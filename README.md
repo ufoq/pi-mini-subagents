@@ -192,7 +192,13 @@ Actually executed during development:
   The container was deleted afterwards; nothing was published to npmjs. A later
   unpublish + republish of `0.1.0` also succeeded on the private registry (its
   artifacts are disposable; public npmjs is never writable from here).
-- No real-model native-TUI probe was run.
+- Real provider **DeepSeek V4.1 Flash**, native **TUI** (real PTY): spawn and
+  immediate parent return, existing/live activity in `/agents`, rendered steering,
+  notice-only completion, explicit read, retained word after steering plus
+  follow-up, human stop, clean exit.
+- Same real-model TUI loop with third-party extensions loaded (powerline footer,
+  a context extension, a terminal bundle) in an isolated temp agent dir: viewer
+  open/close, editor and exit remain functional; no extension load failure.
 - `npm pack --dry-run --json`: payload includes only source modules, package
   metadata and README; not tests, fixtures, scratch logs or design research.
 

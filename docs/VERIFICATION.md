@@ -182,6 +182,37 @@ Only repository files, dedicated subprocesses, scratch config/transcripts and
 local-origin commits/pushes are in scope. No public GitHub push, npm publication,
 environment rollout, credential edits or active-runtime installation occurred.
 
+## Real-model native TUI and third-party extension combo (2026-11-05)
+
+Two opt-in probes were added and run against the released tree with
+`litellm/ollama-cloud/deepseek-v4.1-flash` (thinking off), real inference:
+
+```sh
+MINI_SUBAGENTS_LIVE_MODEL=<provider>/<model> node scripts/probe-tui-live.ts
+MINI_SUBAGENTS_LIVE_MODEL=<provider>/<model> node scripts/probe-combo.ts
+```
+
+- `probe-tui-live.ts` drives real Pi in a PTY with an isolated session directory
+  and only this extension loaded. Passed: spawn returned immediately and the
+  parent continued; `/agents` listed the child and showed its existing/live bash
+  activity; a typed human steering message rendered in the same child
+  conversation; completion arrived as a result-free notice; an explicit `read`
+  returned the child's answer; after steering plus a follow-up, an explicit read
+  returned the remembered word; Ctrl+X stopped the child; `/quit` exited 0.
+- `probe-combo.ts` repeats the loop with the same third-party packages the
+  development environment normally loads (powerline footer, a context extension,
+  a terminal bundle) alongside this extension, using a temp agent directory with
+  symlinks to installed packages and isolated XDG/session storage. Passed the
+  same assertions with no extension load failure, and the editor/exit path stayed
+  functional. Extension presence was confirmed independently: the context
+  extension created its store in the temp XDG dir, the footer rendered, and
+  `get_commands` listed its commands plus this extension's `agents` command; the
+  terminal bundle's compatibility flag (`--no-lsp`) was accepted.
+
+Both probes are harness-time bounded, use normal transcripts under ignored
+`tmp/`, and change no settings. Evidence remains in `tmp/tui-live-probe-*/` and
+`tmp/combo-probe-*/`.
+
 ## Deployment rehearsal (private registry + disposable container)
 
 A deployment path was rehearsed without touching npmjs or any active runtime,

@@ -199,10 +199,11 @@ streams through parent-context messages to pretend otherwise.
 - [x] Implement `/agents` using the shared controller, snapshot and events.
 - [x] Open halfway through; show preceding activity and subsequent live output.
 - [x] Send a correction to that same worker; close/reopen without restarting it.
-- [ ] Verify scrolling, long tool output, narrow width, and no footer/editor
-      conflict with the existing worker extensions. **Partial:** component and
-      isolated native-TUI probes cover scrolling/long output/narrow widths and
-      resize; existing third-party extension combinations are not yet verified.
+- [x] Verify scrolling, long tool output, narrow width, and no footer/editor
+      conflict with existing third-party extensions. Mock-provider component and
+      native-TUI probes cover scrolling/long output/narrow widths and resize; a
+      real-model combo probe loads a powerline footer, a context extension and a
+      terminal bundle alongside this extension and passes the same loop.
 
 ### D. Dedicated project-worker live probes
 
@@ -214,7 +215,9 @@ streams through parent-context messages to pretend otherwise.
 - [x] Load the same extension in a dedicated native-RPC parent probe with its
       own session/stdin/stdout. Do not reuse the TUI parent's history writer.
       Verified with mock provider, a small configured live-model smoke, and a
-      packaged-candidate DeepSeek live run as a fresh isolated Unix user.
+      packaged-candidate DeepSeek live run as a fresh isolated Unix user;
+      `scripts/probe-tui-live.ts` and `scripts/probe-combo.ts` add opt-in
+      real-model native-TUI coverage, including third-party extensions.
 - [x] Prove an idle parent wakes on the notice and can retrieve the child result;
       a busy parent receives the ordinary queued notice without custom routing.
 - [x] Prove follow-up retains context, observer disconnect leaves work running,
@@ -265,7 +268,8 @@ pi --mode rpc --no-session -e ./index.ts      # parent probe; keep stdin open
 Run probes under an explicit harness with separate session history as needed;
 do not repurpose the development agent's active session. These commands describe
 explicit loading; the native probes are saved in `scripts/probe-tui.ts`,
-`scripts/probe-live.ts` (opt-in inference), and `native-rpc.test.ts`.
+`scripts/probe-live.ts`, `scripts/probe-tui-live.ts` and `scripts/probe-combo.ts`
+(opt-in inference), and `native-rpc.test.ts`.
 
 Container lifecycle and any host-side runtime probe are operator tasks and stay
 outside this repository's commands. No host lifecycle, reseed or other-project

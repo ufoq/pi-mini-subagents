@@ -5,7 +5,7 @@ import { Agents } from './agents.ts';
 import { RpcProcess } from './rpc.ts';
 const { default: register, completionNotification, parseModel } = await load.import('../index.ts');
 const { AgentViewer } = await load.import('../viewer.ts');
-const { visibleWidth } = await load.import('@earendil-works/pi-tui');
+const { visibleWidth, CURSOR_MARKER } = await load.import('@earendil-works/pi-tui');
 const { initTheme } = await load.import('@earendil-works/pi-coding-agent');
 // initTheme is public and initializes the native renderers, just as Pi does.
 initTheme('dark');
@@ -211,17 +211,25 @@ test('viewer never hides intent behind status text or tiny heights, and drops st
       assert.match(stopped, /Stopped/, 'stopped state is visible');
       assert.equal(short.input.focused, false, 'a stopped child drops input focus');
     } finally { short.dispose(); }
-    // A long draft scrolls inside the composer instead of scrolling off the line.
+    // A tagged composer reserves its prefix width, so a long draft still scrolls,
+    // keeps its caret marker, and is never truncated after being rendered.
     {
       const fresh = agents.spawn('composer scroll', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
-      const narrow: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 2 } }, plain, () => {}, process.cwd(), fresh);
       try {
-        narrow.focused = true;
-        narrow.handleInput('abcdefghijklmnop');
-        const composer = narrow.render(20).map((l: string) => l.replace(/\x1b\[[0-9;]*m/g, '')).at(-1)!;
-        assert.match(composer, /mnop/, 'the caret end stays visible in a tagged composer');
-        assert.ok(!composer.includes('…'), 'the composer is not truncated after the fact');
-      } finally { narrow.dispose(); }
+        for (const width of [16, 18, 20, 22]) {
+          const narrow: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 3 } }, plain, () => {}, process.cwd(), fresh);
+          try {
+            narrow.focused = true;
+            narrow.handleInput('abcdefghijabcdefghij');
+            const composer = narrow.render(width).at(-1)!;
+            assert.match(composer, /^live > /, `tag present at ${width} columns`);
+            const text = composer.split(CURSOR_MARKER).join('').replace(/\x1b_pi:\/?fc\x07/g, '').replace(/\x1b\[[0-9;]*m/g, '');
+            assert.match(text.trimEnd(), /(?:ij)$/, `the draft tail stays visible at ${width} columns`);
+            assert.ok(!text.includes('...'), `the composer is not post-truncated at ${width} columns`);
+            assert.ok(composer.includes(CURSOR_MARKER), `the caret marker survives at ${width} columns`);
+          } finally { narrow.dispose(); }
+        }
+      } finally { await agents.stop(fresh); }
     }
     // Errors stay readable next to the intent, and intent never crowds them out.
     {

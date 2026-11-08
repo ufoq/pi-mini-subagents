@@ -252,7 +252,10 @@ Covered by:
   transition with its caret intact. The heading is sanitized against escape injection,
   a long draft scrolls inside the composer rather than being truncated after the fact,
   error text stays visible beside the one-word intent, and a warm render reuses the
-  cached snapshot instead of cloning the conversation.
+  cached snapshot instead of cloning the conversation. The composer assertions were
+  checked against the pre-fix revision (`732b8b7`), which loses the caret marker and
+  truncates the draft tail at 16–22 columns; `agents.test.ts` waits for the tool
+  result text itself rather than tool creation, removing an observed timing race.
 
 This is an optional per-spawn argument, not a role/agent-definition registry; the
 rest of the launch configuration stays fixed.

@@ -37,7 +37,7 @@ export class AgentViewer {
     });
     this.input.onSubmit = message => {
       if (!this.selected || !message.trim()) return;
-      if (this.mode() === 'stopped' || this.mode() === 'failed') { this.status = `${this.selected} cannot take more input.`; return; }
+      if (this.mode() === 'stopped') { this.status = `${this.selected} is stopped; it cannot take more input.`; return; }
       const id = this.selected;
       this.input.setValue('');
       this.status = `Sending to ${id}…`;
@@ -46,7 +46,7 @@ export class AgentViewer {
     this.input.onEscape = () => this.back();
   }
   get focused() { return this._focused; }
-  set focused(value: boolean) { this._focused = value; this.input.focused = value && !!this.selected && ['stopped', 'failed'].includes(this.mode()) === false; }
+  set focused(value: boolean) { this._focused = value; this.input.focused = value && !!this.selected && this.mode() !== 'stopped'; }
 
   dispose() { this.unsubscribe(); }
   /** Newest child first, so a fresh spawn is at the top of the list. */
@@ -59,13 +59,6 @@ export class AgentViewer {
   /** Re-open the highlight after every reset truncation may have inserted. */
   private highlight(text: string) {
     return text.split(/(\x1b\[0m)/).map(part => part === '\x1b[0m' ? part : this.theme.bg('selectedBg', part)).join('');
-  }
-  /** States what Enter does, so a finished child is not mistaken for a live steer. */
-  private guidance(mode = this.mode()) {
-    return mode === 'steer' ? 'Enter sends to this child now; it may finish first.'
-      : mode === 'message' ? 'Enter starts a new turn in this conversation.'
-        : mode === 'failed' ? 'This child failed; Esc returns to the list.'
-          : 'Stopped; Esc returns to the list.';
   }
   private hint(width: number, tiers: string[]) {
     return this.theme.fg('dim', tiers.find(text => visibleWidth(text) <= width) ?? tiers.at(-1)!);
@@ -90,7 +83,7 @@ export class AgentViewer {
       else if (matchesKey(data, Key.down)) this.cursor = rows[Math.min(rows.length - 1, index + 1)]?.id;
       else if (matchesKey(data, Key.enter) && rows[index]) {
         this.selected = rows[index].id; this.dirty = true; this.snapshotCache = undefined;
-        this.input.focused = this.focused && !['stopped', 'failed'].includes(this.mode()); this.scroll.scrollToEnd();
+        this.input.focused = this.focused && this.mode() !== 'stopped'; this.scroll.scrollToEnd();
       }
     } else if (matchesKey(data, Key.pageUp)) this.scroll.scrollBy(-Math.max(1, this.scroll.viewportHeight - 1));
     else if (matchesKey(data, Key.pageDown)) this.scroll.scrollBy(Math.max(1, this.scroll.viewportHeight - 1));
@@ -99,7 +92,7 @@ export class AgentViewer {
       const id = this.selected;
       this.status = `Stopping ${id}…`;
       void this.agents.stop(id).then(() => { this.status = `${id} stopped.`; }, error => { this.status = String(error); }).finally(() => this.tui.requestRender());
-    } else if (!['stopped', 'failed'].includes(this.mode())) this.input.handleInput(data);
+    } else if (this.mode() !== 'stopped') this.input.handleInput(data);
     this.tui.requestRender();
   }
 
@@ -164,7 +157,7 @@ export class AgentViewer {
     // Reserve title, hint and input first; the hint and status line are the only
     // things that may be dropped when the terminal is extremely short.
     const mode = modeOf(snapshot.status);
-    this.input.focused = this.focused && mode !== 'stopped' && mode !== 'failed';
+    this.input.focused = this.focused && mode !== 'stopped';
     const showStatus = height >= 3;
     const showHint = height >= 5;
     const viewport = Math.max(0, height - 2 - (showHint ? 1 : 0) - (showStatus ? 1 : 0));
@@ -180,7 +173,7 @@ export class AgentViewer {
       fit(this.theme.bold(this.theme.fg('accent', `${snapshot.id} ${snapshot.status} — ${plain(snapshot.task)}`))),
       ...lines.slice(this.scroll.scrollTop, this.scroll.scrollTop + viewport).map(fit),
       ...(showHint ? [fit(this.hint(width, ['PgUp/PgDn scroll · Ctrl+Y live · Ctrl+X stop · Esc list', 'PgUp/PgDn · Ctrl+Y · Ctrl+X · Esc', 'Ctrl+X stop · Esc']))] : []),
-      ...(showStatus ? [fit([intentOf(mode), snapshot.error || this.status].filter(Boolean).join(' · '))] : []),
+      ...(showStatus ? [fit([intentOf(mode), snapshot.error, this.status].filter(Boolean).join(' · '))] : []),
       ...composer,
     ];
   }
@@ -220,13 +213,12 @@ export class AgentViewer {
   }
 }
 
-type Mode = 'steer' | 'message' | 'stopped' | 'failed';
+type Mode = 'steer' | 'message' | 'stopped';
 function modeOf(status: string): Mode {
-  if (status === 'stopped' || status === 'failed') return status;
-  return status === 'starting' || status === 'running' ? 'steer' : 'message';
+  return status === 'stopped' ? 'stopped' : status === 'starting' || status === 'running' ? 'steer' : 'message';
 }
-const tagOf = (mode: Mode) => mode === 'steer' ? 'live' : mode === 'message' ? 'idle' : mode === 'failed' ? 'failed' : 'stopped';
-const intentOf = (mode: Mode) => mode === 'steer' ? 'Enter→steer' : mode === 'message' ? 'Enter→new turn' : mode === 'failed' ? 'Child failed' : 'Stopped';
+const tagOf = (mode: Mode) => mode === 'steer' ? 'live' : mode === 'message' ? 'idle' : 'stopped';
+const intentOf = (mode: Mode) => mode === 'steer' ? 'Enter→steer' : mode === 'message' ? 'Enter→new turn' : 'Stopped';
 
 export async function openViewer(agents: Agents, ctx: ExtensionContext, id?: string) {
   if (ctx.mode !== 'tui') return;

@@ -28,7 +28,7 @@ test('launch is immediate; late snapshot, live activity, steering and persistent
     const id = agents.spawn(brief, invocation);
     assert.equal(typeof id, 'string');
     assert.equal(agents.list()[0].status, 'starting');
-    await until(() => !!agents.snapshot(id).tools.t1);
+    await until(() => agents.snapshot(id).tools.t1?.result?.content?.[0]?.text === 'live output');
     const snapshot = agents.snapshot(id);
     assert.equal(snapshot.messages[0].content, brief);
     assert.equal(snapshot.tools.t1.result.content[0].text, 'live output');

@@ -56,6 +56,15 @@ export class AgentViewer {
     const found = this.cursor ? rows.findIndex(c => c.id === this.cursor) : -1;
     return found >= 0 ? found : 0;
   }
+  /**
+   * Intent plus the newest diagnostic. When the line is too narrow for both, the
+   * intent shrinks to one word so the error stays readable.
+   */
+  private statusLine(mode: Mode, error: string | undefined, width: number) {
+    const detail = [error, this.status].filter(Boolean).join(' · ');
+    const intent = !detail || visibleWidth(intentOf(mode)) + 3 + 6 <= width ? intentOf(mode) : shortIntentOf(mode);
+    return [intent, detail].filter(Boolean).join(' · ');
+  }
   /** Re-open the highlight after every reset truncation may have inserted. */
   private highlight(text: string) {
     return text.split(/(\x1b\[0m)/).map(part => part === '\x1b[0m' ? part : this.theme.bg('selectedBg', part)).join('');
@@ -173,7 +182,7 @@ export class AgentViewer {
       fit(this.theme.bold(this.theme.fg('accent', `${snapshot.id} ${snapshot.status} — ${plain(snapshot.task)}`))),
       ...lines.slice(this.scroll.scrollTop, this.scroll.scrollTop + viewport).map(fit),
       ...(showHint ? [fit(this.hint(width, ['PgUp/PgDn scroll · Ctrl+Y live · Ctrl+X stop · Esc list', 'PgUp/PgDn · Ctrl+Y · Ctrl+X · Esc', 'Ctrl+X stop · Esc']))] : []),
-      ...(showStatus ? [fit([intentOf(mode), snapshot.error, this.status].filter(Boolean).join(' · '))] : []),
+      ...(showStatus ? [fit(this.statusLine(mode, snapshot.error, width))] : []),
       ...composer,
     ];
   }
@@ -219,6 +228,8 @@ function modeOf(status: string): Mode {
 }
 const tagOf = (mode: Mode) => mode === 'steer' ? 'live' : mode === 'message' ? 'idle' : 'stopped';
 const intentOf = (mode: Mode) => mode === 'steer' ? 'Enter→steer' : mode === 'message' ? 'Enter→new turn' : 'Stopped';
+/** A narrower intent, so a diagnostic keeps most of a short line. */
+const shortIntentOf = (mode: Mode) => mode === 'steer' ? 'steer' : mode === 'message' ? 'turn' : 'stopped';
 
 export async function openViewer(agents: Agents, ctx: ExtensionContext, id?: string) {
   if (ctx.mode !== 'tui') return;

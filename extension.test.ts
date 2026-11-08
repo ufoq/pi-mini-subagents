@@ -107,8 +107,10 @@ test('viewer keeps its cursor, states input intent and fits narrow hints', async
     await agents.stop(first);
     assert.match(viewer.render(60).join('\n'), /Stopped/);
     const before = agents.snapshot(first).messages.length;
-    viewer.handleInput('should not be typed'); viewer.handleInput('\r');
-    assert.equal(agents.snapshot(first).messages.length, before, 'stopped child takes no input');
+    viewer.handleInput('should not be typed');
+    assert.equal(viewer.input.getValue(), '', 'a stopped child never receives keystrokes');
+    viewer.input.setValue('should not be sent'); viewer.handleInput('\r');
+    assert.equal(agents.snapshot(first).messages.length, before, 'a stopped child submits nothing');
     // Exactly one row carries the selection background.
     viewer.handleInput('\u001b');
     assert.equal((viewer.render(40).join('\n').match(/\x1b\[48;5;24m/g) ?? []).length, 1);
@@ -235,7 +237,21 @@ test('viewer never hides intent behind status text or tiny heights, and drops st
     {
       viewer.status = 'Error: prompt rejected by the child process';
       const line = viewer.render(40).join('\n');
-      assert.match(line, /prompt rejected/, 'the error itself is visible, not just the intent');
+      assert.match(line, /prompt rejected/, 'the error itself is visible at 40 columns');
+      assert.match(line, /Stopped|Enter→new turn|turn ·/, 'intent survives the error');
+    }
+    // A failed child shows its diagnostic even on a 20-column overlay.
+    {
+      const failing = agents.spawn('failing task', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
+      const narrow: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 24 } }, plain, () => {}, process.cwd(), failing);
+      try {
+        await wait(() => agents.status(failing) === 'running');
+        await (agents as any).children.get(failing).rpc.request('provider_error');
+        await wait(() => agents.status(failing) === 'failed');
+        const line = narrow.render(20).join('\n').replace(/\x1b\[[0-9;]*m/g, '');
+        assert.match(line, /provider/, 'the diagnostic is not crowded out by the intent');
+        assert.match(line, /turn/, 'the intent is still stated');
+      } finally { narrow.dispose(); await agents.stop(failing); }
     }
     // Rendering does not re-clone the conversation when the cache is warm.
     {
@@ -274,7 +290,7 @@ test('viewer late attach/live tools/scroll/narrow widths/steering/close-reopen u
   };
   let viewer: any;
   try {
-    await wait(() => !!agents.snapshot(id).tools.t1);
+    await wait(() => agents.snapshot(id).tools.t1?.result?.content?.[0]?.text === 'live output');
     viewer = new AgentViewer(agents, tui, theme, () => {}, process.cwd(), id);
     viewer.focused = true;
     const initial = viewer.render(100).join('\n');

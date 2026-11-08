@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { RpcProcess } from './rpc.ts';
 import { mockProvider, isolatedEnvironment } from './fixtures/mock-provider.ts';
 
@@ -20,6 +21,16 @@ function alive(pid: number) {
     return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0] !== 'Z';
   } catch { return false; }
 }
+/** True once any child transcript persisted the given text, so no fixed sleep is needed. */
+function childWrote(root: string, needle: string) {
+  const dir = resolve(root, 'sessions');
+  try {
+    for (const file of readdirSync(dir, { recursive: true }) as string[]) {
+      if (file.endsWith('.jsonl') && readFileSync(resolve(dir, file), 'utf8').includes(needle)) return true;
+    }
+  } catch { /* session dir not created yet */ }
+  return false;
+}
 async function until(fn: () => boolean, label: string) {
   for (let i = 0; i < 1000; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
   assert.fail(`Timed out: ${label}`);
@@ -27,7 +38,7 @@ async function until(fn: () => boolean, label: string) {
 
 test('native RPC parent: immediate launch, idle wake, explicit read, busy follow-up and shutdown', async () => {
   const mock = await mockProvider();
-  const { env } = await isolatedEnvironment(mock.url);
+  const { root, env } = await isolatedEnvironment(mock.url);
   const oldEnv = { ...process.env };
   Object.assign(process.env, env);
   const events: any[] = [];
@@ -70,10 +81,10 @@ test('native RPC parent: immediate launch, idle wake, explicit read, busy follow
     await prompt('BUSY');
     await until(() => mock.busyPending.length === 1, 'parent busy');
     mock.releaseChild();
-    // Native custom follow-ups do not appear in RPC queue_update (it reports
-    // user queues only). Hold the parent provider response across child finish.
-    await new Promise(r => setTimeout(r, 200));
-    assert.equal((await rpc.request('get_state')).isStreaming, true);
+    // Hold the parent provider response across a real child completion instead of
+    // sleeping: the child's own transcript is the completion evidence.
+    await until(() => childWrote(root, 'follow-up recall color'), 'child finished while parent busy');
+    assert.equal((await rpc.request('get_state')).isStreaming, true, 'parent still busy');
     assert.equal(notifications().length, 1, 'custom follow-up not inserted mid-response');
     assert.equal(settled(), beforeBusy, 'busy parent not interrupted');
     mock.releaseBusy();

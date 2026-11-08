@@ -56,6 +56,10 @@ export class AgentViewer {
     const found = this.cursor ? rows.findIndex(c => c.id === this.cursor) : -1;
     return found >= 0 ? found : 0;
   }
+  /** Re-open the highlight after every reset truncation may have inserted. */
+  private highlight(text: string) {
+    return text.split(/(\x1b\[0m)/).map(part => part === '\x1b[0m' ? part : this.theme.bg('selectedBg', part)).join('');
+  }
   private hint(width: number, tiers: string[]) {
     return this.theme.fg('dim', tiers.find(text => visibleWidth(text) <= width) ?? tiers.at(-1)!);
   }
@@ -75,6 +79,8 @@ export class AgentViewer {
     input.onSubmit = this.input.onSubmit;
     input.onEscape = this.input.onEscape;
     input.setValue(value);
+    // setValue() leaves the cursor at column 0; keep a draft as the user left it.
+    if (value) input.handleInput('\u0005'); // Ctrl+E: end of line
     input.focused = this.focused && !!this.selected && mode !== 'stopped';
     this.input = input;
   }
@@ -111,7 +117,9 @@ export class AgentViewer {
     // minus the frame's two borders and two blank rows.
     const rows = Math.max(1, this.tui.terminal.rows);
     const cap = Math.max(1, Math.floor((rows * 9) / 10));
-    const framed = width >= 32 && cap >= 8;
+    // Framing must never push the title, hint, status or input line out of the
+    // overlay: the conversation needs at least one row of its own.
+    const framed = width >= 32 && cap >= (this.selected ? 9 : 7);
     const height = Math.max(1, cap - (framed ? 4 : 0));
     const inner = framed ? Math.max(1, width - 4) : width;
     const body = this.body(inner, height);
@@ -142,15 +150,17 @@ export class AgentViewer {
       const rows = this.rows();
       const index = this.listIndex(rows);
       this.cursor = rows[index]?.id;
-      const visible = Math.max(0, height - 2);
+      // Reserve the title and, when it fits, the hint, so a row is always reachable.
+      const showHint = height >= 3;
+      const visible = Math.max(0, height - 1 - (showHint ? 1 : 0));
       const start = Math.max(0, index - visible + 1);
       return [this.theme.bold(this.theme.fg('accent', `Subagents — existing conversations${rows.length ? ` (${rows.length})` : ''}`)),
         ...(rows.length ? rows.slice(start, start + visible).map((c, i) => {
           const row = start + i === index;
           const line = `${row ? '> ' : '  '}${c.id} ${c.status}: ${c.task}`;
-          return row ? this.theme.bg('selectedBg', pad(line)) : pad(line);
+          return row ? this.highlight(pad(line)) : pad(line);
         }) : ['No children. Ask the parent to use subagent spawn.']),
-        this.hint(width, ['↑↓ select · Enter open · Esc close (children keep running)', '↑↓ select · Enter open · Esc close', '↑↓ · Enter · Esc']),
+        ...(showHint ? [this.hint(width, ['↑↓ select · Enter open · Esc close (children keep running)', '↑↓ select · Enter open · Esc close', '↑↓ · Enter · Esc'])] : []),
       ].map(fit);
     }
     this.syncInput();
@@ -160,14 +170,18 @@ export class AgentViewer {
     }
     // ScrollView's public state helpers supply follow/end and bounded scrolling.
     // A custom overlay's render() owns the viewport, so clip its rendered lines here.
+    // Reserve title, hint and input first; the hint and status line are the only
+    // things that may be dropped when the terminal is extremely short.
+    const showHint = height >= 3;
+    const showStatus = height >= 5;
+    const viewport = Math.max(0, height - 2 - (showHint ? 1 : 0) - (showStatus ? 1 : 0));
     const lines = this.scroll.render(width);
-    const viewport = Math.max(1, Math.min(height - 4, height - 1));
-    this.scroll.updateLayout(lines.length, viewport, () => this.tui.requestRender());
+    this.scroll.updateLayout(lines.length, Math.max(1, viewport), () => this.tui.requestRender());
     return [
       fit(this.theme.bold(this.theme.fg('accent', `${snapshot.id} ${snapshot.status} — ${snapshot.task.replace(/\s+/g, ' ')}`))),
       ...lines.slice(this.scroll.scrollTop, this.scroll.scrollTop + viewport).map(fit),
-      fit(this.hint(width, ['PgUp/PgDn scroll · Ctrl+Y live · Ctrl+X stop · Esc list', 'PgUp/PgDn · Ctrl+Y · Ctrl+X · Esc', 'Ctrl+X stop · Esc'])),
-      fit(this.status || snapshot.error || ''),
+      ...(showHint ? [fit(this.hint(width, ['PgUp/PgDn scroll · Ctrl+Y live · Ctrl+X stop · Esc list', 'PgUp/PgDn · Ctrl+Y · Ctrl+X · Esc', 'Ctrl+X stop · Esc']))] : []),
+      ...(showStatus ? [fit(this.status || snapshot.error || '')] : []),
       ...this.input.render(width).map(fit),
     ];
   }

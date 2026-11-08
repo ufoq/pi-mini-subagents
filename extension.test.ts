@@ -133,6 +133,56 @@ test('viewer keeps its cursor, states input intent and fits narrow hints', async
   } finally { viewer.dispose(); await agents.shutdown(); }
 });
 
+test('viewer keeps the input visible on short terminals and highlights truncated rows fully', async () => {
+  const long = `start ${'lorem ipsum '.repeat(20)}end`;
+  const agents = new Agents(() => {});
+  const id = agents.spawn(long, { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
+  const ansi = { fg: (_: string, s: string) => `\x1b[36m${s}\x1b[0m`, bg: (_: string, s: string) => `\x1b[48;5;24m${s}\x1b[0m`, bold: (s: string) => `\x1b[1m${s}\x1b[0m` };
+  const bgColumns = (line: string) => {
+    let active = false; let columns = 0;
+    for (const part of line.split(/(\x1b\[[0-9;]*m)/)) {
+      if (part === '\x1b[48;5;24m') { active = true; continue; }
+      if (part === '\x1b[0m') { active = false; continue; }
+      if (part.startsWith('\x1b[')) continue;
+      if (active) columns += visibleWidth(part);
+    }
+    return columns;
+  };
+  const wait = async (fn: () => boolean) => {
+    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    assert.fail('condition not reached');
+  };
+  const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 24 } }, ansi, () => {}, process.cwd(), id);
+  try {
+    await wait(() => agents.snapshot(id).status === 'running');
+    // Truncated row: the ellipsis and the padding after it stay highlighted.
+    viewer.handleInput('\u001b'); // back to the list
+    const list = viewer.render(40);
+    const row = list.find((line: string) => line.includes('\x1b[48;5;24m'))!;
+    assert.match(row.replace(/\x1b\[[0-9;]*m/g, ''), /\.\.\./, 'the label is truncated');
+    assert.equal(bgColumns(row), 36, 'highlight covers the whole inner row after resets');
+    // Short terminals keep the input line instead of clipping it away.
+    for (const rows of [7, 9, 11, 16]) {
+      const sized: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows } }, ansi, () => {}, process.cwd(), id);
+      try {
+        const lines = sized.render(80);
+        assert.ok(lines.length <= Math.floor(rows * 0.9), `fits ${rows} rows`);
+        assert.match(lines.join('\n').replace(/\x1b\[[0-9;]*m/g, ''), /(?:Steer|Message|Stopped)> /, `input visible at ${rows} rows`);
+      } finally { sized.dispose(); }
+    }
+    // A draft survives the running -> finished label change, cursor intact.
+    viewer.handleInput('\r'); // reopen the child
+    viewer.focused = true;
+    for (const ch of 'draft') viewer.handleInput(ch);
+    const rpc = (agents as any).children.get(id).rpc;
+    await rpc.request('finish'); await rpc.request('settle');
+    await wait(() => agents.snapshot(id).status === 'finished');
+    viewer.render(80);
+    viewer.handleInput('X');
+    assert.equal(viewer.input.getValue(), 'draftX', `draft keeps its cursor position across relabel, got ${JSON.stringify(viewer.input.getValue())}`);
+  } finally { viewer.dispose(); await agents.shutdown(); }
+});
+
 test('viewer late attach/live tools/scroll/narrow widths/steering/close-reopen use same registry', async () => {
   let rpc: RpcProcess;
   const notices: any[] = [];

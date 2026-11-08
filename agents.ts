@@ -68,20 +68,23 @@ export class Agents {
     }
     // Launch succeeded: publish everything a synchronous factory callback queued.
     child.held = false;
-    if (child.dirty) { child.dirty = false; this.changed(id); }
-    for (const status of child.pending?.splice(0) ?? []) this.complete(id, status);
     child.ready = this.start(child, message);
-    this.changed(id);
+    const provisional = child.dirty === true;
+    if (provisional) { child.dirty = false; this.changed(id); }
+    for (const status of child.pending?.splice(0) ?? []) this.complete(id, status);
+    if (!provisional) this.changed(id);
     return id;
   }
 
   private async start(child: Child, message: string) {
     try {
+      // A synchronous factory callback may already have finished this launch.
+      if (child.status !== 'starting') return;
       const state = await child.rpc.request('get_state');
       child.sessionId = state.sessionId;
       const history = await child.rpc.request('get_messages');
       child.messages = history.messages ?? [];
-      if (child.status === 'stopped') return;
+      if (child.status !== 'starting') return;
       child.status = 'running';
       this.changed(child.id);
       const accepted = await child.rpc.request('prompt', { message, streamingBehavior: 'steer' });
@@ -154,8 +157,10 @@ export class Agents {
   }
   private changed(id: string) {
     const child = this.children.get(id);
+    // A discarded child must never reach observers.
+    if (!child) return;
     // A provisional child is not published until its process exists.
-    if (child?.held) { child.dirty = true; return; }
+    if (child.held) { child.dirty = true; return; }
     for (const listener of [...this.listeners]) {
       try { listener(id); } catch (error) { console.error('Subagent observer failed:', error); }
     }
@@ -172,8 +177,15 @@ export class Agents {
   private complete(id: string, status: Status) {
     if (this.closing) return;
     const child = this.children.get(id);
-    if (child?.held) { (child.pending ??= []).push(status); return; }
-    this.notify(id, status);
+    // A discarded child never completes; a held one queues until launch.
+    if (!child) return;
+    if (child.held) { (child.pending ??= []).push(status); return; }
+    try {
+      this.notify(id, status);
+    } catch (error) {
+      // Delivery failure must not invalidate an otherwise running child.
+      console.error('Subagent completion delivery failed:', error);
+    }
   }
 
   private event(c: Child, e: RecordData) {

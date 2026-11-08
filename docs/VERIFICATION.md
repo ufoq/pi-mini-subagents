@@ -237,7 +237,10 @@ Covered by:
   provisional entry. A third case covers a factory that reports failure
   synchronously but still returns a process: the child is retained and its single
   failure completion is published after launch, so it is neither lost nor emitted
-  for an unknown id.
+  for an unknown id. Further cases cover a callback queued by a factory that then
+  throws (never reaches observers or the parent), a throwing completion notifier
+  (the retained child survives), and startup never overwriting a synchronous
+  terminal state with `running` or submitting work for it.
 
 This is an optional per-spawn argument, not a role/agent-definition registry; the
 rest of the launch configuration stays fixed.

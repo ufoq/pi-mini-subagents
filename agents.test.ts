@@ -142,9 +142,10 @@ test('a synchronous failure from a factory that still returns a process is deliv
     failure(new Error('spawn failed synchronously'));
     return { request: async () => { throw new Error('unreachable'); }, stop: async () => {} } as any;
   });
-  const id = agents.spawn('task', invocation);
   agents.subscribe(() => observed.push(agents.list().map(c => `${c.id} ${c.status}`)));
+  const id = agents.spawn('task', invocation);
   assert.equal(id, 'j1');
+  assert.deepEqual(observed, [['j1 failed']], 'one publication, after launch, with the final state');
   assert.deepEqual(agents.list().map(c => `${c.id} ${c.status}`), ['j1 failed']);
   await until(() => notices.length === 1);
   assert.deepEqual(notices, [{ id: 'j1', status: 'failed' }]);
@@ -164,6 +165,48 @@ test('a factory that fails synchronously before throwing emits no notification',
   assert.deepEqual(agents.list(), []);
   assert.equal(notices.length, 0, 'no completion for a child id the caller never received');
   assert.deepEqual(observed, [], 'a discarded child is never published to observers');
+  await agents.shutdown();
+});
+
+test('callbacks queued by a factory that then throws never reach observers or the parent', async () => {
+  const notices: any[] = [];
+  const observed: string[][] = [];
+  const agents = new Agents((id, status) => notices.push({ id, status }), (_spec, event) => {
+    // Callback arrives after the factory has already failed the launch.
+    queueMicrotask(() => event({ type: 'agent_settled' }));
+    throw new Error('factory threw');
+  });
+  agents.subscribe(() => observed.push(agents.list().map(c => `${c.id} ${c.status}`)));
+  assert.throws(() => agents.spawn('task', invocation), /Could not start j1: factory threw/);
+  await new Promise(r => setImmediate(r));
+  assert.deepEqual(agents.list(), []);
+  assert.deepEqual(observed, [], 'a discarded child is never published');
+  assert.deepEqual(notices, [], 'a discarded child never completes');
+  await agents.shutdown();
+});
+
+test('a throwing completion notifier does not invalidate a retained child', async () => {
+  const agents = new Agents(() => { throw new Error('notify channel closed'); }, (_spec, _event, failure) => {
+    failure(new Error('spawn failed synchronously'));
+    return { request: async () => { throw new Error('unreachable'); }, stop: async () => {} } as any;
+  });
+  const id = agents.spawn('task', invocation);
+  assert.equal(id, 'j1');
+  assert.deepEqual(agents.list().map(c => `${c.id} ${c.status}`), ['j1 failed']);
+  assert.match(agents.read('j1'), /spawn failed synchronously/);
+  await agents.shutdown();
+});
+
+test('startup never overwrites a synchronous terminal state', async () => {
+  const prompts: any[] = [];
+  const agents = new Agents(() => {}, (_spec, _event, failure) => {
+    failure(new Error('spawn failed synchronously'));
+    return { request: async (type: string, data: any) => { if (type === 'prompt') prompts.push(data); return {}; }, stop: async () => {} } as any;
+  });
+  const id = agents.spawn('task', invocation);
+  await new Promise(r => setTimeout(r, 20));
+  assert.equal(agents.snapshot(id).status, 'failed');
+  assert.deepEqual(prompts, [], 'no work submitted for a launch that already failed');
   await agents.shutdown();
 });
 

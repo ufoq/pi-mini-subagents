@@ -218,7 +218,16 @@ and rendering time. Concurrent actors share native Pi steering semantics, not
 transactional task control. Providers installed only by a parent extension (or
 runtime-only credential overrides) are not automatically inherited. Existing
 third-party footer/editor extension combinations have not been exhaustively
-compatibility-tested. No dashboard, publication or rollout is included.
+compatibility-tested.
+
+**Known upstream interaction:** pi-powerline-footer 0.17.1 throws
+`Cannot read properties of undefined (reading 'replace')` in its
+`before_agent_start` handler when a run is started by a custom message with no
+user prompt, which is exactly how completion notices wake an idle parent. Pi
+catches per-handler errors, so the notice is still delivered and only a log line
+appears. The guard (`event.messageType === "custom"`) is present from 0.22.0;
+upgrade that extension to avoid the noise. No dashboard, publication or rollout
+is included.
 
 Authoritative scope: [HANDOFF.md](HANDOFF.md), [DEFAULTS.md](docs/design/DEFAULTS.md),
 [FEATURES.md](docs/design/FEATURES.md), [PLAN.md](docs/design/PLAN.md). Research is

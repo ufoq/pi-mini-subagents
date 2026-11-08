@@ -258,7 +258,11 @@ Covered by:
   result text itself rather than tool creation, removing an observed timing race.
 - Children advertise every built-in coding tool (`read`, `bash`, `edit`, `write`,
   `grep`, `find`, `ls`) and never `subagent`, so a child cannot delegate further.
-  Verified from the tool declarations a real child sends to the provider. The
+  Verified from the tool declarations a real child sends to the provider.
+- A child with skills enabled advertises the inherited skill catalog in its system
+  prompt (verified by capturing the provider request: `web-search/SKILL.md` and its
+  description were present), while `--no-extensions` still leaves it without the
+  `subagent` tool. The
   busy-parent probe now waits for the child's own persisted transcript instead of a
   fixed sleep, and the status line shrinks its intent so a 20-column overlay still
   shows a failed child's diagnostic.

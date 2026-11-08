@@ -56,8 +56,10 @@ forks. Use all built-in coding tools (`read`, `bash`/`powershell`, `edit`, `writ
 `grep`, `find`, `ls`) but no extension or MCP tools; parent prompts describe read-only intent,
 allowed files and task ownership. Those instructions are not a sandbox.
 
-Disable automatically loaded extensions, MCP, skills, templates and themes in
-children. Do not copy the parent's resource catalog or load our launcher again.
+Disable automatically loaded extensions, MCP, prompt templates and themes in
+children. Keep skills available so research skills (`web-search`) work there; they
+add instructions and paths, not new tools. Do not copy the parent's resource
+catalog or load our launcher again.
 Keep normal project-instruction discovery and Pi transcript storage. This is a
 small fixed launch configuration, not a role/permission/inheritance framework.
 

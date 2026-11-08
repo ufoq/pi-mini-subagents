@@ -113,9 +113,12 @@ controls are separate from the TUI for a later explicit adapter.
   (the rest of the launch configuration is fixed). Follow-up reuses that child.
   No parent-transcript fork.
 - Children use all built-in coding tools: `read`, `bash` (`powershell` on
-  Windows), `edit`, `write`, `grep`, `find`, `ls`. Discovered
-  extensions, MCP, skills, templates and themes are disabled. Project instruction
-  discovery and normal Pi transcript storage remain enabled.
+  Windows), `edit`, `write`, `grep`, `find`, `ls`. Skills are inherited, so a
+  research skill such as `web-search` works in a child. Discovered extensions,
+  MCP, templates and themes stay disabled; project instruction discovery and
+  normal Pi transcript storage remain enabled. RPC children cannot answer Pi's
+  project-trust prompt, so trust-gated project skills load only when a saved
+  decision or `defaultProjectTrust` allows them; user-level skills always load.
 - **Prompt restrictions are not a sandbox.** State read-only intent, allowed
   files/actions and ownership in the task brief. Children can mutate the shared
   workspace and use the parent's configured credentials/network access.

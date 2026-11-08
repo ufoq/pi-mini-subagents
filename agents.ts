@@ -17,7 +17,8 @@ type ProcessFactory = (spec: Invocation, event: (e: RecordData) => void, failure
 export function childInvocation(cwd: string, model?: { provider: string; id: string }, thinking?: string): Invocation {
   // All built-in coding tools; no extension/MCP tools, so children cannot delegate.
   const shell = process.platform === 'win32' ? 'powershell' : 'bash';
-  const args = ['--mode', 'rpc', '--no-extensions', '--no-mcp', '--no-skills', '--no-prompt-templates', '--no-themes', '--tools', `read,${shell},edit,write,grep,find,ls`];
+  // Skills stay on so children can use research skills; no extensions, so no delegation.
+  const args = ['--mode', 'rpc', '--no-extensions', '--no-mcp', '--no-prompt-templates', '--no-themes', '--tools', `read,${shell},edit,write,grep,find,ls`];
   if (model) args.push('--provider', model.provider, '--model', model.id);
   if (thinking) args.push('--thinking', thinking);
   // Use the same CLI as the parent when running a standard Node installation.

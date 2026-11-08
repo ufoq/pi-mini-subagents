@@ -186,6 +186,9 @@ test('callbacks queued by a factory that then throws never reach observers or th
 });
 
 test('a throwing completion notifier does not invalidate a retained child', async () => {
+  const logged: any[] = [];
+  const error = console.error;
+  console.error = (...args: any[]) => logged.push(args);
   const agents = new Agents(() => { throw new Error('notify channel closed'); }, (_spec, _event, failure) => {
     failure(new Error('spawn failed synchronously'));
     return { request: async () => { throw new Error('unreachable'); }, stop: async () => {} } as any;
@@ -194,6 +197,8 @@ test('a throwing completion notifier does not invalidate a retained child', asyn
   assert.equal(id, 'j1');
   assert.deepEqual(agents.list().map(c => `${c.id} ${c.status}`), ['j1 failed']);
   assert.match(agents.read('j1'), /spawn failed synchronously/);
+  console.error = error;
+  assert.match(String(logged.at(-1)), /completion delivery failed/i, 'delivery failure is logged, not silent');
   await agents.shutdown();
 });
 
@@ -207,6 +212,34 @@ test('startup never overwrites a synchronous terminal state', async () => {
   await new Promise(r => setTimeout(r, 20));
   assert.equal(agents.snapshot(id).status, 'failed');
   assert.deepEqual(prompts, [], 'no work submitted for a launch that already failed');
+  await agents.shutdown();
+});
+
+test('a settlement queued before stop and delivered after it is ignored', async () => {
+  const notices: any[] = [];
+  let deliver: any;
+  const agents = new Agents((id, status) => notices.push({ id, status }), (_spec, event) => {
+    deliver = event;
+    return { request: async () => ({ messages: [] }), stop: async () => {} } as any;
+  });
+  const id = agents.spawn('task', invocation);
+  await until(() => agents.snapshot(id).status === 'running');
+  await agents.stop(id);
+  deliver({ type: 'agent_settled' });
+  assert.equal(agents.snapshot(id).status, 'stopped');
+  assert.deepEqual(notices, [], 'explicit stop sends no completion');
+  await agents.shutdown();
+});
+
+test('a failed launch still consumes its id, so ids stay monotonic', async () => {
+  let calls = 0;
+  const agents = new Agents(() => {}, () => {
+    if (++calls === 1) throw new Error('factory threw');
+    return new RpcProcess({ command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() }, () => {}, () => {});
+  });
+  assert.throws(() => agents.spawn('task', invocation), /Could not start j1/);
+  const second = agents.spawn('task', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
+  assert.equal(second, 'j2');
   await agents.shutdown();
 });
 

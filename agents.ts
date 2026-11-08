@@ -173,7 +173,7 @@ export class Agents {
     this.complete(c.id, c.status);
   }
 
-  /** Completion is delivered once, after launch, never for a discarded child. */
+  /** Attempt completion once, after launch, never for a discarded child. Delivery failures are logged, not retried. */
   private complete(id: string, status: Status) {
     if (this.closing) return;
     const child = this.children.get(id);

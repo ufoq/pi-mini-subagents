@@ -16,11 +16,9 @@ type ProcessFactory = (spec: Invocation, event: (e: RecordData) => void, failure
 
 export function childInvocation(cwd: string, model?: { provider: string; id: string }, thinking?: string): Invocation {
   const shell = process.platform === 'win32' ? 'powershell' : 'bash';
-  // Same resources as the parent except extensions: all built-in tools, skills,
-  // MCP, templates and themes. Only Pi's built-in MCP support is loaded, so the
-  // child never gets our extension and therefore cannot delegate.
-  const args = ['--mode', 'rpc', '--no-extensions', '-e', 'builtin:mcp', '-e', 'builtin:codemode', '-e', 'builtin:tool-search',
-    '--tools', `read,${shell},edit,write,grep,find,ls,codemode,tool_search,mcp__*`];
+  // All built-in tools plus inherited skills, templates and themes. Extensions
+  // stay off, so MCP and our own `subagent` tool never load in a child.
+  const args = ['--mode', 'rpc', '--no-extensions', '--tools', `read,${shell},edit,write,grep,find,ls`];
   if (model) args.push('--provider', model.provider, '--model', model.id);
   if (thinking) args.push('--thinking', thinking);
   // Use the same CLI as the parent when running a standard Node installation.

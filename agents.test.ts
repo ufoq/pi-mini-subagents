@@ -273,9 +273,9 @@ test('child CLI inherits parent resources except extensions, with all tools', ()
     assert.ok(!spec.args.includes(flag), `${flag} would strip a parent resource`);
   }
   const shell = process.platform === 'win32' ? 'powershell' : 'bash';
-  assert.ok(spec.args.includes(`read,${shell},edit,write,grep,find,ls,codemode,tool_search,mcp__*`), 'all parent tools, including MCP');
-  assert.ok(spec.args.includes('builtin:mcp'), 'built-in MCP support is loaded explicitly');
-  assert.ok(!spec.args.includes('./index.ts') && !spec.args.includes('-e ./index.ts'), 'our extension never loads in a child');
+  assert.ok(spec.args.includes(`read,${shell},edit,write,grep,find,ls`), 'all built-in tools');
+  assert.ok(!spec.args.some(a => a.startsWith('builtin:')), 'no built-in extensions either, so no MCP');
+  assert.ok(!spec.args.includes('./index.ts'), 'our extension never loads in a child');
   assert.ok(spec.args.includes('provider')); assert.ok(spec.args.includes('model')); assert.ok(spec.args.includes('high'));
   for (const flag of ['--continue', '--fork', '--no-context-files', '--no-session']) assert.ok(!spec.args.includes(flag));
 });

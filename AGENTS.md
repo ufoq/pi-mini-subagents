@@ -46,6 +46,9 @@ slice simple; do not restart the architecture survey or adopt a framework.
 - Parent fetches results explicitly. Human viewing creates no parent-context
   traffic. Keep model schemas small.
 - Ordinary coding tools; restrictions and file ownership belong in task prompts.
+- `viewer.ts` is a secondary surface: keep it good enough for occasional lookups, do not
+  expand it into a UI project. A web UI is a later goal and out of v1 scope; the
+  controller (`agents.ts`) is UI-agnostic and `viewer.ts` is only one consumer.
 - No concurrency limits/queue, request budget, runtime deadline, read-only
   enforcement, writer lock, worktrees, recursion framework, parent Escape policy,
   completion retry ledger, durable recovery, or full RPC/server implementation.

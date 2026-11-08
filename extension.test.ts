@@ -103,9 +103,9 @@ test('viewer keeps its cursor, states input intent and fits narrow hints', async
     await rpc.request('finish'); await rpc.request('settle');
     await wait(() => agents.snapshot(first).status === 'finished');
     viewer.handleInput('\r');
-    assert.match(viewer.render(60).join('\n'), /starts a new turn/, 'finished child starts a new turn');
+    assert.match(viewer.render(60).join('\n'), /Enter→new turn/, 'finished child starts a new turn');
     await agents.stop(first);
-    assert.match(viewer.render(60).join('\n'), /Stopped; Esc/);
+    assert.match(viewer.render(60).join('\n'), /Stopped/);
     const before = agents.snapshot(first).messages.length;
     viewer.handleInput('should not be typed'); viewer.handleInput('\r');
     assert.equal(agents.snapshot(first).messages.length, before, 'stopped child takes no input');
@@ -198,19 +198,44 @@ test('viewer never hides intent behind status text or tiny heights, and drops st
     // Guidance is not masked by transient feedback.
     viewer.status = 'Input accepted by j1.';
     const tall = viewer.render(80).join('\n');
-    assert.match(tall, /may finish first/, 'guidance survives feedback');
+    assert.match(tall, /Enter→steer/, 'intent survives feedback');
     assert.match(tall, /Input accepted by j1\./, 'feedback is still shown');
     // Short terminals carry the state next to the composer instead.
     const short: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 5 } }, plain, () => {}, process.cwd(), id);
     try {
-      assert.match(short.render(80).join('\n'), /live > /, 'running state is visible without the status line');
+      assert.match(short.render(80).join('\n'), /Enter→steer/, 'short terminals still show intent');
       short.focused = true;
       short.handleInput('\u0018'); // Ctrl+X -> stop
       await wait(() => agents.status(id) === 'stopped');
       const stopped = short.render(80).join('\n');
-      assert.match(stopped, /stopped > /, 'stopped state is visible');
+      assert.match(stopped, /Stopped/, 'stopped state is visible');
       assert.equal(short.input.focused, false, 'a stopped child drops input focus');
     } finally { short.dispose(); }
+    // A long draft scrolls inside the composer instead of scrolling off the line.
+    {
+      const fresh = agents.spawn('composer scroll', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
+      const narrow: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 2 } }, plain, () => {}, process.cwd(), fresh);
+      try {
+        narrow.focused = true;
+        narrow.handleInput('abcdefghijklmnop');
+        const composer = narrow.render(20).map((l: string) => l.replace(/\x1b\[[0-9;]*m/g, '')).at(-1)!;
+        assert.match(composer, /mnop/, 'the caret end stays visible in a tagged composer');
+        assert.ok(!composer.includes('…'), 'the composer is not truncated after the fact');
+      } finally { narrow.dispose(); }
+    }
+    // Errors stay readable next to the intent, and intent never crowds them out.
+    {
+      viewer.status = 'Error: prompt rejected by the child process';
+      const line = viewer.render(40).join('\n');
+      assert.match(line, /prompt rejected/, 'the error itself is visible, not just the intent');
+    }
+    // Rendering does not re-clone the conversation when the cache is warm.
+    {
+      viewer.render(80);
+      const original = agents.snapshot.bind(agents);
+      (agents as any).snapshot = () => { throw new Error('snapshot called during a warm render'); };
+      try { viewer.render(80); } finally { agents.snapshot = original; }
+    }
     // Geometry sweep: every sampled size fits the cap and keeps the composer.
     for (const rows of [1, 2, 3, 5, 8, 12]) {
       for (const width of [8, 16, 31, 32, 60]) {
@@ -276,4 +301,16 @@ test('viewer late attach/live tools/scroll/narrow widths/steering/close-reopen u
     viewer.handleInput('\u0018'); // Ctrl+X
     await wait(() => agents.snapshot(id).status === 'stopped');
   } finally { viewer?.dispose(); await agents.shutdown(); }
+});
+
+test('a task label cannot inject terminal escapes into the conversation heading', async () => {
+  const agents = new Agents(() => {});
+  const plainTheme = { fg: (_: string, s: string) => s, bg: (_: string, s: string) => s, bold: (s: string) => s };
+  const id = agents.spawn('\x1b[48;5;196mRED\x1b[0m task', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
+  const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 24 } }, plainTheme, () => {}, process.cwd(), id);
+  try {
+    const detail = viewer.render(80).join('\n');
+    assert.ok(!detail.includes('\x1b[48;5;196m'), 'heading drops the injected background');
+    assert.match(detail, /RED task/, 'the readable text remains');
+  } finally { viewer.dispose(); await agents.shutdown(); }
 });

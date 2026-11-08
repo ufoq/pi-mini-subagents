@@ -31,14 +31,17 @@ export function messageText(message?: RecordData): string {
   if (typeof message.content === 'string') return message.content;
   return (message.content ?? []).map((c: RecordData) => c.type === 'text' ? c.text : c.type === 'toolCall' ? `${c.name} ${JSON.stringify(c.arguments)}` : '').filter(Boolean).join('\n');
 }
-/** One line, no terminal escapes/control characters, at most 100 code points. */
-export function label(text: string): string {
-  const plain = text
+/** One line with no terminal escapes or control characters. */
+export function plain(text: string): string {
+  return text
     .replace(/\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07/g, '')
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  return [...plain].slice(0, 100).join('');
+}
+/** A plain label, additionally bounded to 100 code points for model replies. */
+export function label(text: string): string {
+  return [...plain(text)].slice(0, 100).join('');
 }
 const bounded = (text: string) => text.length <= 8000 ? text : text.slice(0, 8000) + '\n[truncated; full conversation in /agents]';
 function requireMessage(message: string) {

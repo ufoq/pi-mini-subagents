@@ -249,7 +249,10 @@ Covered by:
   terminal rows, and the frame's 32-column threshold is pinned. The composer is
   verified visible from 1 to 16 terminal rows, the highlight covers every inner
   column after truncation inserts resets, and a draft survives a run-finish
-  transition with its caret intact.
+  transition with its caret intact. The heading is sanitized against escape injection,
+  a long draft scrolls inside the composer rather than being truncated after the fact,
+  error text stays visible beside the one-word intent, and a warm render reuses the
+  cached snapshot instead of cloning the conversation.
 
 This is an optional per-spawn argument, not a role/agent-definition registry; the
 rest of the launch configuration stays fixed.

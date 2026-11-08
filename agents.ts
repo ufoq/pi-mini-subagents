@@ -55,8 +55,15 @@ export class Agents {
     if (this.closing) throw new Error('Subagent registry is shutting down.');
     const id = `j${++this.sequence}`;
     const child = { id, task: message, status: 'starting', messages: [], tools: {} } as Child;
+    let rpc: RpcProcess;
+    try {
+      rpc = this.createProcess(invocation, event => this.event(child, event), error => this.failed(child, error));
+    } catch (error) {
+      // e.g. invalid argv: never retain a child that owns no process.
+      throw new Error(`Could not start ${id}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    child.rpc = rpc;
     this.children.set(id, child);
-    child.rpc = this.createProcess(invocation, event => this.event(child, event), error => this.failed(child, error));
     child.ready = this.start(child, message);
     this.changed(id);
     return id;

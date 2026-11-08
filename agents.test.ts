@@ -124,6 +124,17 @@ test('stop during startup does not submit work or emit completion', async () => 
   await agents.shutdown();
 });
 
+test('a child whose process cannot be constructed is never retained', async () => {
+  const notices: any[] = [];
+  const agents = new Agents((id, status) => notices.push({ id, status }), () => {
+    throw new Error("The argument 'args[5]' must be a string without null bytes.");
+  });
+  assert.throws(() => agents.spawn('task', invocation), /Could not start j1: .*null bytes/);
+  assert.deepEqual(agents.list(), []);
+  assert.equal(notices.length, 0);
+  await agents.shutdown(); // must not touch a half-registered child
+});
+
 test('child CLI has fresh context, ordinary tools, explicit resources disabled, model/thinking defaults', () => {
   const spec = childInvocation('/tmp', { provider: 'provider', id: 'model' }, 'high');
   for (const flag of ['--mode', '--no-extensions', '--no-mcp', '--no-skills', '--no-prompt-templates', '--no-themes']) assert.ok(spec.args.includes(flag));

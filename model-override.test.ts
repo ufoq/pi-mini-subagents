@@ -4,11 +4,12 @@ import { RpcProcess } from './rpc.ts';
 import { mockProvider, isolatedEnvironment } from './fixtures/mock-provider.ts';
 
 // Proves the optional per-spawn model override reaches the child as real
-// --provider/--model flags: the child requests its own model while the parent
-// keeps its own.
-test('native RPC parent: spawn model override uses that model only for the child', async () => {
+// --provider/--model flags: the child's provider is a second endpoint while the
+// parent keeps its own provider and model.
+test('native RPC parent: spawn model override switches provider and model for the child only', async () => {
   const mock = await mockProvider();
-  const { env } = await isolatedEnvironment(mock.url);
+  const alt = await mockProvider(); // separate port: a distinct provider baseUrl
+  const { env } = await isolatedEnvironment(mock.url, alt.url);
   const oldEnv = { ...process.env };
   Object.assign(process.env, env);
   const events: any[] = [];
@@ -29,19 +30,20 @@ test('native RPC parent: spawn model override uses that model only for the child
     const state = await rpc.request('get_state');
     assert.equal(`${state.model.provider}/${state.model.id}`, 'mock/mock');
     await prompt('DELEGATE_ALT');
-    await until(() => mock.childPending.length === 1, 'child request reached provider');
-    const child = mock.requests.filter(r => !isParent(r)).at(-1);
-    assert.equal(child.model, 'mock-alt', 'child requested the overridden model');
-    mock.releaseChild();
-    await until(() => mock.childPending.length === 1, 'child tool result');
-    mock.releaseChild();
+    await until(() => alt.childPending.length === 1, 'child request reached the second provider');
+    assert.equal(alt.requests.at(-1).model, 'mock-alt', 'child requested the overridden model');
+    assert.equal(mock.requests.filter(r => !isParent(r)).length, 0, 'no child request used the parent provider');
+    alt.releaseChild();
+    await until(() => alt.childPending.length === 1, 'child tool result');
+    alt.releaseChild();
     await until(() => settled() >= 2, 'completion');
     const parent = mock.requests.filter(isParent).at(-1);
-    assert.equal(parent.model, 'mock', 'parent kept its own model');
+    assert.equal(parent.model, 'mock', 'parent kept its own model on its own provider');
     assert.deepEqual(failures, []);
   } finally {
     await rpc.stop();
     await mock.close();
+    await alt.close();
     for (const key of Object.keys(env)) {
       if (oldEnv[key] === undefined) delete process.env[key]; else process.env[key] = oldEnv[key];
     }

@@ -38,7 +38,7 @@ export async function mockProvider() {
       childPending.push(work);
     } else if (last.role === 'tool') answer(res, 'PARENT_CONTINUES');
     else if (latest.includes('<system-notification>')) answer(res, 'NOTICE_SEEN');
-    else if (latest.startsWith('DELEGATE_ALT')) answer(res, undefined, { name: 'subagent', args: { action: 'spawn', model: 'mock/mock-alt', message: 'MOCK_ALT_CHILD remember cobalt. Use only the scratch task, do not modify files.' } });
+    else if (latest.startsWith('DELEGATE_ALT')) answer(res, undefined, { name: 'subagent', args: { action: 'spawn', model: 'mock2/mock-alt', message: 'MOCK_ALT_CHILD remember cobalt. Use only the scratch task, do not modify files.' } });
     else if (latest.startsWith('DELEGATE')) answer(res, undefined, { name: 'subagent', args: { action: 'spawn', message: 'MOCK_CHILD remember cobalt. Use only the scratch task, do not modify files.' } });
     else if (latest.startsWith('READ')) answer(res, undefined, { name: 'subagent', args: { action: 'read', id: 'j1' } });
     else if (latest.startsWith('SEND')) answer(res, undefined, { name: 'subagent', args: { action: 'send', id: 'j1', message: 'follow-up recall color' } });
@@ -58,18 +58,24 @@ export async function mockProvider() {
   };
 }
 
-export async function isolatedEnvironment(url: string) {
+export async function isolatedEnvironment(url: string, altUrl?: string) {
   await mkdir('tmp', { recursive: true });
   const root = await mkdtemp(resolve('tmp/native-probe-'));
   const agentDir = resolve(root, 'agent');
   await mkdir(agentDir);
-  await writeFile(resolve(agentDir, 'models.json'), JSON.stringify({ providers: { mock: {
-    baseUrl: url, api: 'openai-completions', apiKey: 'not-a-real-key',
-    models: [
-      { id: 'mock', name: 'Offline fixture', reasoning: false, contextWindow: 128000, maxTokens: 2048 },
-      { id: 'mock-alt', name: 'Offline fixture alt', reasoning: false, contextWindow: 128000, maxTokens: 2048 },
-    ],
-  } } }));
+  await writeFile(resolve(agentDir, 'models.json'), JSON.stringify({ providers: {
+    mock: {
+      baseUrl: url, api: 'openai-completions', apiKey: 'not-a-real-key',
+      models: [
+        { id: 'mock', name: 'Offline fixture', reasoning: false, contextWindow: 128000, maxTokens: 2048 },
+        { id: 'mock-alt', name: 'Offline fixture alt', reasoning: false, contextWindow: 128000, maxTokens: 2048 },
+      ],
+    },
+    ...altUrl ? { mock2: {
+      baseUrl: altUrl, api: 'openai-completions', apiKey: 'not-a-real-key',
+      models: [{ id: 'mock-alt', name: 'Offline fixture on a second provider', reasoning: false, contextWindow: 128000, maxTokens: 2048 }],
+    } } : {},
+  } }));
   await writeFile(resolve(agentDir, 'settings.json'), JSON.stringify({ theme: 'dark', quietStartup: true, cacheWarming: 'off', retry: { enabled: false }, defaultProvider: 'mock', defaultModel: 'mock' }));
   return { root, env: {
     HOME: root, PI_CODING_AGENT_DIR: agentDir, PI_CODING_AGENT_SESSION_DIR: resolve(root, 'sessions'),

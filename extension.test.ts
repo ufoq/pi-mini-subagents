@@ -43,6 +43,8 @@ test('one compact tool, actionable validation, exact completion-only delivery an
   assert.throws(() => parseModel('claude-sonnet-4-5'), /provider\/model/);
   assert.throws(() => parseModel('/model'), /provider\/model/);
   assert.throws(() => parseModel('provider/'), /provider\/model/);
+  assert.throws(() => parseModel('mock/bad\u0000id'), /control characters/);
+  assert.throws(() => parseModel('mock/bad\u001bid'), /control characters/);
 });
 
 test('viewer late attach/live tools/scroll/narrow widths/steering/close-reopen use same registry', async () => {

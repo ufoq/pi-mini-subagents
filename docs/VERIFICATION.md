@@ -222,13 +222,16 @@ before any process starts.
 
 Covered by:
 
-- Unit assertions on the parser (`undefined`, plain, slash-containing id, and the
-  three invalid forms).
-- `model-override.test.ts`: a native RPC parent on `mock/mock` is prompted to
-  spawn with `model: "mock/mock-alt"`. The child's provider request carries
-  `model: "mock-alt"` while the parent's carries `mock`, proving the override
-  reaches the child as real `--provider/--model` flags and does not leak to the
-  parent.
+- Unit assertions on the parser (`undefined`, plain, slash-containing id, the
+  three malformed forms, and embedded control characters such as NUL).
+- `model-override.test.ts`: a native RPC parent on provider `mock` spawns with
+  `model: "mock2/mock-alt"`, where `mock2` is a **second provider on a different
+  port**. The child's only requests arrive at that second endpoint with model
+  `mock-alt`, no child request touches the parent's provider, and the parent keeps
+  `mock` — proving both provider and model forwarding.
+- A regression test that a child whose process cannot be constructed (e.g. invalid
+  argv) is not retained: spawn reports an actionable error, `list` stays empty and
+  shutdown does not touch a half-registered child.
 
 This is an optional per-spawn argument, not a role/agent-definition registry; the
 rest of the launch configuration stays fixed.

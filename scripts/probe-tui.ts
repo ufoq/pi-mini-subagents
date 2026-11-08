@@ -42,7 +42,7 @@ try {
   input('/agents\r');
   await until(() => output().includes('existing conversations'), 'child list');
   input('\r');
-  await until(() => output().includes('Steer>'), 'existing conversation');
+  await until(() => output().includes('Enter sends to this child'), 'existing conversation');
   mock.releaseChild();
   await until(() => output().includes('TOOL_STARTED'), 'live bash output in viewer');
   assert.ok(output().includes('MOCK_CHILD'), 'preceding task is visible');
@@ -54,7 +54,7 @@ try {
   assert.equal(mock.childPending.length, 1);
   const beforeReopen = raw.length;
   input('/agents j1\r');
-  await until(() => /(?:Steer|Message)> /.test(stripVTControlCharacters(raw.slice(beforeReopen))), 'reopen same child');
+  await until(() => stripVTControlCharacters(raw.slice(beforeReopen)).includes('Enter sends to this child'), 'reopen same child');
   command({ type: 'resize', rows: 24, columns: 40 });
   input('\u001b[5~'); input('\u001b[6~');
   await new Promise(r => setTimeout(r, 100));
@@ -75,7 +75,7 @@ try {
   await until(() => stripVTControlCharacters(raw.slice(beforeFollowup)).includes('NOTICE_SEEN'), 'follow-up completion');
   input('/agents j1\r');
   const beforeStop = raw.length;
-  await until(() => /(?:Steer|Message|Stopped)> /.test(stripVTControlCharacters(raw.slice(beforeStop))), 'open to stop');
+  await until(() => stripVTControlCharacters(raw.slice(beforeStop)).includes('Enter sends to this child'), 'open to stop');
   input('\u0018');
   await until(() => output().includes('j1 stopped'), 'human explicit stop');
   await closeViewer(); input('/quit\r');

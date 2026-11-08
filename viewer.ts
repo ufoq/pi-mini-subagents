@@ -16,8 +16,7 @@ export class AgentViewer {
   private cwd: string;
   private selected?: string;
   private cursor?: string;
-  private inputMode: 'steer' | 'message' | 'stopped' = 'steer';
-  private input = new Input({ prompt: 'Steer> ', placeholder: 'Enter sends to this child' });
+  private input = new Input({ prompt: '> ', placeholder: 'Enter sends to this child' });
   private content = new Container();
   private scroll = new ScrollView(this.content, { follow: 'end', scrollbar: 'hidden' });
   private dirty = true;
@@ -37,7 +36,7 @@ export class AgentViewer {
     });
     this.input.onSubmit = message => {
       if (!this.selected || !message.trim()) return;
-      if (this.inputMode === 'stopped') { this.status = `${this.selected} is stopped; it cannot take more input.`; return; }
+      if (this.mode() === 'stopped') { this.status = `${this.selected} is stopped; it cannot take more input.`; return; }
       const id = this.selected;
       this.input.setValue('');
       this.status = `Sending to ${id}…`;
@@ -46,7 +45,7 @@ export class AgentViewer {
     this.input.onEscape = () => this.back();
   }
   get focused() { return this._focused; }
-  set focused(value: boolean) { this._focused = value; this.input.focused = value && !!this.selected && this.inputMode !== 'stopped'; }
+  set focused(value: boolean) { this._focused = value; this.input.focused = value && !!this.selected && this.mode() !== 'stopped'; }
 
   dispose() { this.unsubscribe(); }
   /** Newest child first, so a fresh spawn is at the top of the list. */
@@ -60,29 +59,19 @@ export class AgentViewer {
   private highlight(text: string) {
     return text.split(/(\x1b\[0m)/).map(part => part === '\x1b[0m' ? part : this.theme.bg('selectedBg', part)).join('');
   }
+  /** States what Enter does, so a finished child is not mistaken for a live steer. */
+  private guidance() {
+    return this.mode() === 'steer' ? 'Enter steers this child.'
+      : this.mode() === 'message' ? 'Enter starts a new turn in this conversation.'
+        : 'Stopped; Esc returns to the list.';
+  }
   private hint(width: number, tiers: string[]) {
     return this.theme.fg('dim', tiers.find(text => visibleWidth(text) <= width) ?? tiers.at(-1)!);
   }
-  /** The input label states what Enter will do for this child's current state. */
-  private syncInput() {
+  /** What Enter would do for the highlighted child right now; derived, never cached. */
+  private mode(): 'steer' | 'message' | 'stopped' {
     const status = this.selected ? this.agents.snapshot(this.selected).status : 'running';
-    const mode = status === 'stopped' ? 'stopped' : status === 'starting' || status === 'running' ? 'steer' : 'message';
-    if (mode === this.inputMode && this.input) { this.input.focused = this.focused && !!this.selected && mode !== 'stopped'; return; }
-    this.inputMode = mode;
-    const options = mode === 'steer'
-      ? { prompt: 'Steer> ', placeholder: 'Enter steers this child' }
-      : mode === 'message'
-        ? { prompt: 'Message> ', placeholder: 'Enter starts a new turn' }
-        : { prompt: 'Stopped> ', placeholder: 'Stopped; Esc goes back' };
-    const value = this.input.getValue();
-    const input = new Input(options);
-    input.onSubmit = this.input.onSubmit;
-    input.onEscape = this.input.onEscape;
-    input.setValue(value);
-    // setValue() leaves the cursor at column 0; keep a draft as the user left it.
-    if (value) input.handleInput('\u0005'); // Ctrl+E: end of line
-    input.focused = this.focused && !!this.selected && mode !== 'stopped';
-    this.input = input;
+    return status === 'stopped' ? 'stopped' : status === 'starting' || status === 'running' ? 'steer' : 'message';
   }
   invalidate() { this.dirty = true; this.content.invalidate(); this.input.invalidate(); }
   private back() {
@@ -99,7 +88,7 @@ export class AgentViewer {
       if (matchesKey(data, Key.up)) this.cursor = rows[Math.max(0, index - 1)]?.id;
       else if (matchesKey(data, Key.down)) this.cursor = rows[Math.min(rows.length - 1, index + 1)]?.id;
       else if (matchesKey(data, Key.enter) && rows[index]) {
-        this.selected = rows[index].id; this.dirty = true; this.syncInput(); this.scroll.scrollToEnd();
+        this.selected = rows[index].id; this.dirty = true; this.input.focused = this.focused && this.mode() !== 'stopped'; this.scroll.scrollToEnd();
       }
     } else if (matchesKey(data, Key.pageUp)) this.scroll.scrollBy(-Math.max(1, this.scroll.viewportHeight - 1));
     else if (matchesKey(data, Key.pageDown)) this.scroll.scrollBy(Math.max(1, this.scroll.viewportHeight - 1));
@@ -108,7 +97,7 @@ export class AgentViewer {
       const id = this.selected;
       this.status = `Stopping ${id}…`;
       void this.agents.stop(id).then(() => { this.status = `${id} stopped.`; }, error => { this.status = String(error); }).finally(() => this.tui.requestRender());
-    } else if (this.inputMode !== 'stopped') this.input.handleInput(data);
+    } else if (this.mode() !== 'stopped') this.input.handleInput(data);
     this.tui.requestRender();
   }
 
@@ -163,7 +152,6 @@ export class AgentViewer {
         ...(showHint ? [this.hint(width, ['↑↓ select · Enter open · Esc close (children keep running)', '↑↓ select · Enter open · Esc close', '↑↓ · Enter · Esc'])] : []),
       ].map(fit);
     }
-    this.syncInput();
     const snapshot = this.agents.snapshot(this.selected);
     if (this.dirty) {
       this.rebuild(snapshot); this.dirty = false;
@@ -175,13 +163,15 @@ export class AgentViewer {
     const showHint = height >= 3;
     const showStatus = height >= 5;
     const viewport = Math.max(0, height - 2 - (showHint ? 1 : 0) - (showStatus ? 1 : 0));
+    // A one-row terminal can only show one thing; the composer is the actionable one.
+    if (height === 1) return this.input.render(width).map(fit);
     const lines = this.scroll.render(width);
     this.scroll.updateLayout(lines.length, Math.max(1, viewport), () => this.tui.requestRender());
     return [
       fit(this.theme.bold(this.theme.fg('accent', `${snapshot.id} ${snapshot.status} — ${snapshot.task.replace(/\s+/g, ' ')}`))),
       ...lines.slice(this.scroll.scrollTop, this.scroll.scrollTop + viewport).map(fit),
       ...(showHint ? [fit(this.hint(width, ['PgUp/PgDn scroll · Ctrl+Y live · Ctrl+X stop · Esc list', 'PgUp/PgDn · Ctrl+Y · Ctrl+X · Esc', 'Ctrl+X stop · Esc']))] : []),
-      ...(showStatus ? [fit(this.status || snapshot.error || '')] : []),
+      ...(showStatus ? [fit(this.status || snapshot.error || this.guidance())] : []),
       ...this.input.render(width).map(fit),
     ];
   }

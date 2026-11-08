@@ -246,7 +246,10 @@ Covered by:
   (`Steer>`, `Message>`, `Stopped>`), narrow-width hints that always fit, and
   model-facing list labels that are escape-free, one line and code-point bounded.
   Layout is also bounded by the overlay's own 90% height cap at 7, 12, 24 and 80
-  terminal rows, and the frame's 32-column threshold is pinned.
+  terminal rows, and the frame's 32-column threshold is pinned. The composer is
+  verified visible from 1 to 16 terminal rows, the highlight covers every inner
+  column after truncation inserts resets, and a draft survives a run-finish
+  transition with its caret intact.
 
 This is an optional per-spawn argument, not a role/agent-definition registry; the
 rest of the launch configuration stays fixed.

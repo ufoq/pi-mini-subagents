@@ -87,7 +87,8 @@ through Pi's void API is not a delivery/consumption acknowledgment.
 - `/agents j1` directly opens that child when it exists.
 - The conversation shows earlier user/assistant messages, thinking, tool
   arguments/results, and live assistant/tool updates using public Pi renderers.
-- Type in **Steer>** and press Enter to send to that same child.
+- Type at the **>** prompt and press Enter to send to that same child; the status
+  line says whether that steers a running child or starts a new turn.
 - **Page Up / Page Down** scroll; **Ctrl+Y** follows live output.
 - **Ctrl+X** explicitly stops the selected child.
 - **Escape** returns to the list; Escape again closes the viewer. Neither stops

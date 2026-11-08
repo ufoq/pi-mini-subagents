@@ -103,9 +103,9 @@ test('viewer keeps its cursor, states input intent and fits narrow hints', async
     await rpc.request('finish'); await rpc.request('settle');
     await wait(() => agents.snapshot(first).status === 'finished');
     viewer.handleInput('\r');
-    assert.match(viewer.render(60).join('\n'), /Message> /, 'finished child starts a new turn');
+    assert.match(viewer.render(60).join('\n'), /starts a new turn/, 'finished child starts a new turn');
     await agents.stop(first);
-    assert.match(viewer.render(60).join('\n'), /Stopped> /);
+    assert.match(viewer.render(60).join('\n'), /Stopped; Esc/);
     const before = agents.snapshot(first).messages.length;
     viewer.handleInput('should not be typed'); viewer.handleInput('\r');
     assert.equal(agents.snapshot(first).messages.length, before, 'stopped child takes no input');
@@ -161,13 +161,13 @@ test('viewer keeps the input visible on short terminals and highlights truncated
     const row = list.find((line: string) => line.includes('\x1b[48;5;24m'))!;
     assert.match(row.replace(/\x1b\[[0-9;]*m/g, ''), /\.\.\./, 'the label is truncated');
     assert.equal(bgColumns(row), 36, 'highlight covers the whole inner row after resets');
-    // Short terminals keep the input line instead of clipping it away.
-    for (const rows of [7, 9, 11, 16]) {
+    // Short terminals keep the input line instead of clipping it away, down to one row.
+    for (const rows of [1, 2, 3, 7, 9, 11, 16]) {
       const sized: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows } }, ansi, () => {}, process.cwd(), id);
       try {
         const lines = sized.render(80);
-        assert.ok(lines.length <= Math.floor(rows * 0.9), `fits ${rows} rows`);
-        assert.match(lines.join('\n').replace(/\x1b\[[0-9;]*m/g, ''), /(?:Steer|Message|Stopped)> /, `input visible at ${rows} rows`);
+        assert.ok(lines.length <= Math.max(1, Math.floor(rows * 0.9)), `fits ${rows} rows, got ${lines.length}: ${JSON.stringify(lines.map((l: string) => l.replace(/\x1b\[[0-9;]*m/g, '')))}`);
+        assert.match(lines.join('\n').replace(/\x1b\[[0-9;]*m/g, ''), /sends to this child|^> /m, `input visible at ${rows} rows`);
       } finally { sized.dispose(); }
     }
     // A draft survives the running -> finished label change, cursor intact.

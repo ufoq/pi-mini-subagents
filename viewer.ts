@@ -107,11 +107,15 @@ export class AgentViewer {
   }
 
   render(width: number): string[] {
-    // Room for the overlay's own margins plus a one-cell border and padding.
-    const framed = width >= 32;
-    const height = Math.max(3, this.tui.terminal.rows - 6 - (framed ? 4 : 0));
+    // The overlay is capped at 90% of the terminal, so the body must fit that cap
+    // minus the frame's two borders and two blank rows.
+    const rows = Math.max(1, this.tui.terminal.rows);
+    const cap = Math.max(1, Math.floor((rows * 9) / 10));
+    const framed = width >= 32 && cap >= 8;
+    const height = Math.max(1, cap - (framed ? 4 : 0));
     const inner = framed ? Math.max(1, width - 4) : width;
     const body = this.body(inner, height);
+    if (body.length > height) body.length = height;
     if (!framed) return body;
     // A plain overlay composites as an unpadded block; this frame gives it edges and
     // breathing room, matching the bordered dialogs Pi itself renders.
@@ -138,9 +142,10 @@ export class AgentViewer {
       const rows = this.rows();
       const index = this.listIndex(rows);
       this.cursor = rows[index]?.id;
-      const start = Math.max(0, index - height + 3);
+      const visible = Math.max(0, height - 2);
+      const start = Math.max(0, index - visible + 1);
       return [this.theme.bold(this.theme.fg('accent', `Subagents — existing conversations${rows.length ? ` (${rows.length})` : ''}`)),
-        ...(rows.length ? rows.slice(start, start + height - 2).map((c, i) => {
+        ...(rows.length ? rows.slice(start, start + visible).map((c, i) => {
           const row = start + i === index;
           const line = `${row ? '> ' : '  '}${c.id} ${c.status}: ${c.task}`;
           return row ? this.theme.bg('selectedBg', pad(line)) : pad(line);
@@ -156,7 +161,7 @@ export class AgentViewer {
     // ScrollView's public state helpers supply follow/end and bounded scrolling.
     // A custom overlay's render() owns the viewport, so clip its rendered lines here.
     const lines = this.scroll.render(width);
-    const viewport = Math.max(1, height - 4);
+    const viewport = Math.max(1, Math.min(height - 4, height - 1));
     this.scroll.updateLayout(lines.length, viewport, () => this.tui.requestRender());
     return [
       fit(this.theme.bold(this.theme.fg('accent', `${snapshot.id} ${snapshot.status} — ${snapshot.task.replace(/\s+/g, ' ')}`))),

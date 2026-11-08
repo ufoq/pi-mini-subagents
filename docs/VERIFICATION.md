@@ -245,6 +245,8 @@ Covered by:
   full-width selection highlight at truncating widths, state-specific input labels
   (`Steer>`, `Message>`, `Stopped>`), narrow-width hints that always fit, and
   model-facing list labels that are escape-free, one line and code-point bounded.
+  Layout is also bounded by the overlay's own 90% height cap at 7, 12, 24 and 80
+  terminal rows, and the frame's 32-column threshold is pinned.
 
 This is an optional per-spawn argument, not a role/agent-definition registry; the
 rest of the launch configuration stays fixed.

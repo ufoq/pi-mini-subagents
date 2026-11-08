@@ -90,7 +90,9 @@ test('viewer keeps its cursor, states input intent and fits narrow hints', async
     assert.match(viewer.render(60).join('\n'), new RegExp(`> ${first} `), 'inserts keep the cursor on the same id');
     // Enter opens the highlighted child, not the newest one.
     viewer.handleInput('\r');
-    assert.match(viewer.render(60).join('\n'), new RegExp(`${first} `));
+    const detail = viewer.render(60).join('\n');
+    assert.match(detail, new RegExp(`${first} `));
+    assert.match(detail, /PgUp\/PgDn/, 'Enter opened the conversation, not just the list');
     // Selection highlight covers the full inner width even when the label truncates.
     viewer.handleInput('\u001b'); // back to the list
     const row = viewer.render(40).find((line: string) => line.includes('\x1b[48;5;24m'));
@@ -107,8 +109,21 @@ test('viewer keeps its cursor, states input intent and fits narrow hints', async
     const before = agents.snapshot(first).messages.length;
     viewer.handleInput('should not be typed'); viewer.handleInput('\r');
     assert.equal(agents.snapshot(first).messages.length, before, 'stopped child takes no input');
-    // Narrow widths keep a hint that fits, and never exceed the width.
+    // Exactly one row carries the selection background.
     viewer.handleInput('\u001b');
+    assert.equal((viewer.render(40).join('\n').match(/\x1b\[48;5;24m/g) ?? []).length, 1);
+    // The frame appears at 32 columns and not below it.
+    assert.ok(!viewer.render(31).some((line: string) => line.includes('╭')));
+    assert.ok(viewer.render(32).some((line: string) => line.includes('╭')));
+    // Total height stays inside the overlay's 90% cap, small and tall terminals alike.
+    for (const rows of [7, 12, 24, 80]) {
+      const sized: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows } }, ansi, () => {}, process.cwd(), first);
+      try {
+        const lines = sized.render(80);
+        assert.ok(lines.length <= Math.floor(rows * 0.9), `overlay fits ${rows} rows`);
+      } finally { sized.dispose(); }
+    }
+    // Narrow widths keep a hint that fits, and never exceed the width.
     for (const width of [12, 30]) {
       const lines = viewer.render(width);
       assert.ok(lines.every((line: string) => visibleWidth(line) <= width));

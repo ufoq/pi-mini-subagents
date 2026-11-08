@@ -213,6 +213,26 @@ Both probes are harness-time bounded, use normal transcripts under ignored
 `tmp/`, and change no settings. Evidence remains in `tmp/tui-live-probe-*/` and
 `tmp/combo-probe-*/`.
 
+## Per-spawn model override (2026-11-05)
+
+`spawn` accepts an optional `model` as `"provider/model"`; omitted keeps the
+parent model. Model ids may themselves contain slashes, so only the first slash
+separates provider from id. Invalid forms are rejected with an actionable error
+before any process starts.
+
+Covered by:
+
+- Unit assertions on the parser (`undefined`, plain, slash-containing id, and the
+  three invalid forms).
+- `model-override.test.ts`: a native RPC parent on `mock/mock` is prompted to
+  spawn with `model: "mock/mock-alt"`. The child's provider request carries
+  `model: "mock-alt"` while the parent's carries `mock`, proving the override
+  reaches the child as real `--provider/--model` flags and does not leak to the
+  parent.
+
+This is an optional per-spawn argument, not a role/agent-definition registry; the
+rest of the launch configuration stays fixed.
+
 ## Deployment rehearsal (private registry + disposable container)
 
 A deployment path was rehearsed without touching npmjs or any active runtime,

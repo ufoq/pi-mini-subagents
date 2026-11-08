@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { load } from './fixtures/pi-loader.ts';
 import { Agents } from './agents.ts';
 import { RpcProcess } from './rpc.ts';
-const { default: register, completionNotification } = await load.import('../index.ts');
+const { default: register, completionNotification, parseModel } = await load.import('../index.ts');
 const { AgentViewer } = await load.import('../viewer.ts');
 const { visibleWidth } = await load.import('@earendil-works/pi-tui');
 const { initTheme } = await load.import('@earendil-works/pi-coding-agent');
@@ -36,6 +36,13 @@ test('one compact tool, actionable validation, exact completion-only delivery an
   const content = completionNotification('j1', 'failed');
   assert.match(content, /^<system-notification>\nSubagent j1 failed\./);
   assert.ok(!content.includes('SECRET RESULT'));
+  assert.equal(parseModel(undefined), undefined);
+  assert.deepEqual(parseModel('anthropic/claude-sonnet-4-5'), { provider: 'anthropic', id: 'claude-sonnet-4-5' });
+  // Model ids themselves may contain slashes.
+  assert.deepEqual(parseModel(' litellm/ollama-cloud/deepseek-v4.1-flash '), { provider: 'litellm', id: 'ollama-cloud/deepseek-v4.1-flash' });
+  assert.throws(() => parseModel('claude-sonnet-4-5'), /provider\/model/);
+  assert.throws(() => parseModel('/model'), /provider\/model/);
+  assert.throws(() => parseModel('provider/'), /provider\/model/);
 });
 
 test('viewer late attach/live tools/scroll/narrow widths/steering/close-reopen use same registry', async () => {

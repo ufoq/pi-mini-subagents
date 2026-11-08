@@ -18,7 +18,7 @@ or a shared blueprint.
 | Packaging | Our own Pi extension, shared by exclusive native TUI and RPC parent modes. |
 | Workers | Persistent Pi RPC subprocesses. Launch returns an id immediately; parent keeps working. |
 | State | One plain in-memory registry of child handles and conversation/progress data. No custom state/result directories or daemon. |
-| Initial context | Fresh conversation plus the parent's task brief; parent model/thinking by default. No transcript fork. |
+| Initial context | Fresh conversation plus the parent's task brief; parent model/thinking by default, with an optional per-spawn `model: "provider/model"` override. No transcript fork. |
 | Tools and permissions | Ordinary coding tools. Parent states allowed actions, read-only intent, file ownership, etc. in the task prompt. No permission profiles or enforcement machinery. Prompt restrictions are instructions, not a sandbox. |
 | Resources | Do not automatically load every parent extension/MCP into children. No role registry or inheritance framework. |
 | Workspace | Same working directory. Parent coordinates assignments in prompts; no writer locks or automatic worktrees. |

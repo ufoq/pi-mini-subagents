@@ -92,7 +92,7 @@ subagent({ action: "spawn" | "list" | "read" | "send" | "stop",
 
 | Action | Meaning |
 | --- | --- |
-| `spawn` | `message` is the task brief. Register/start a child and return its id immediately; do not await its model run. |
+| `spawn` | `message` is the task brief. Register/start a child and return its id immediately; do not await its model run. Optional `model: "provider/model"` overrides that child's model; omitted means the parent's model. |
 | `list` | Return ids, short task labels and current state, not transcripts. |
 | `read` | Return the identified child's latest result/error; while working, return a short recent-activity view. No status-polling requirement. |
 | `send` | Deliver `message` to the same conversation, steering when busy or starting a new turn when idle. |

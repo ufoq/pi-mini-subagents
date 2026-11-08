@@ -49,12 +49,12 @@ The single tool is:
 
 ```ts
 subagent({ action: "spawn" | "list" | "read" | "send" | "stop",
-           id?: string, message?: string })
+           id?: string, message?: string, model?: string })
 ```
 
 | Action | Required input | Effect |
 | --- | --- | --- |
-| `spawn` | `message` task brief | Returns `j1`, etc. immediately, before startup/model completion. |
+| `spawn` | `message` task brief | Returns `j1`, etc. immediately, before startup/model completion. Optional `model` (`"provider/model"`) overrides the child's model for this child only; omitted means the parent's model. |
 | `list` | — | Short ids, states and task labels; no transcripts. |
 | `read` | `id` | Latest result/diagnostic; while running, recent messages/tools. Bounded to about 8,000 characters. |
 | `send` | `id`, `message` | Same child/context. Native steering when busy, new turn when idle. |
@@ -107,7 +107,9 @@ controls are separate from the TUI for a later explicit adapter.
 ## Execution and safety
 
 - Fresh child conversation, same cwd, parent's model and thinking at launch.
-  Follow-up reuses that child. No parent-transcript fork.
+  `spawn` may override the model per child with `model: "provider/model"`
+  (the rest of the launch configuration is fixed). Follow-up reuses that child.
+  No parent-transcript fork.
 - Children use ordinary `read`, `bash`, `edit`, `write` tools. Discovered
   extensions, MCP, skills, templates and themes are disabled. Project instruction
   discovery and normal Pi transcript storage remain enabled.

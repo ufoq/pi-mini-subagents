@@ -48,6 +48,23 @@ test('one compact tool, actionable validation, exact completion-only delivery an
   assert.throws(() => parseModel('mock/bad\u009bid'), /control characters/);
 });
 
+test('viewer lists newest subagents first', async () => {
+  const agents = new Agents(() => {});
+  const first = agents.spawn('first task', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
+  const second = agents.spawn('second task', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
+  const theme = { fg: (_: string, s: string) => s };
+  const tui = { requestRender() {}, terminal: { rows: 24 } };
+  const viewer: any = new AgentViewer(agents, tui, theme, () => {}, process.cwd());
+  try {
+    const lines = viewer.render(100);
+    const order = lines.map((line: string) => /\(j\d\)|j\d/.exec(line)?.[0]).filter(Boolean);
+    assert.deepEqual(order.slice(0, 2), [second, first], 'newest child on top');
+    // ↓ selects the second row, which is now the older child.
+    viewer.focused = true; viewer.handleInput('\u001b[B'); viewer.handleInput('\r');
+    assert.match(viewer.render(100).join('\n'), new RegExp(`${first} `), 'opens the older child under the cursor');
+  } finally { viewer.dispose(); await agents.shutdown(); }
+});
+
 test('viewer late attach/live tools/scroll/narrow widths/steering/close-reopen use same registry', async () => {
   let rpc: RpcProcess;
   const notices: any[] = [];

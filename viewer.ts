@@ -47,6 +47,8 @@ export class AgentViewer {
   set focused(value: boolean) { this._focused = value; this.input.focused = value && !!this.selected; }
 
   dispose() { this.unsubscribe(); }
+  /** Newest child first, so a fresh spawn is at the top of the list. */
+  private rows() { return [...this.agents.list()].reverse(); }
   invalidate() { this.dirty = true; this.content.invalidate(); this.input.invalidate(); }
   private back() {
     if (this.selected) { this.selected = undefined; this.input.focused = false; this.status = ''; }
@@ -57,7 +59,7 @@ export class AgentViewer {
   handleInput(data: string) {
     if (matchesKey(data, Key.escape)) { this.back(); return; }
     if (!this.selected) {
-      const rows = this.agents.list();
+      const rows = this.rows();
       if (matchesKey(data, Key.up)) this.index = Math.max(0, this.index - 1);
       else if (matchesKey(data, Key.down)) this.index = Math.min(rows.length - 1, this.index + 1);
       else if (matchesKey(data, Key.enter) && rows[this.index]) {
@@ -78,7 +80,7 @@ export class AgentViewer {
     const height = Math.max(3, this.tui.terminal.rows - 6);
     const fit = (line: string) => truncateToWidth(line, width);
     if (!this.selected) {
-      const rows = this.agents.list();
+      const rows = this.rows();
       this.index = Math.max(0, Math.min(this.index, rows.length - 1));
       const start = Math.max(0, this.index - height + 3);
       return [this.theme.fg('accent', 'Subagents — existing conversations'),

@@ -82,7 +82,8 @@ through Pi's void API is not a delivery/consumption acknowledgment.
 
 ## Human controls: `/agents`
 
-- `/agents` opens the existing child list. Up/down selects; Enter opens.
+- `/agents` opens the existing child list, newest child first (`j7` above `j1`).
+  Up/down selects; Enter opens.
 - `/agents j1` directly opens that child when it exists.
 - The conversation shows earlier user/assistant messages, thinking, tool
   arguments/results, and live assistant/tool updates using public Pi renderers.

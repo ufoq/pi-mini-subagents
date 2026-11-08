@@ -231,6 +231,17 @@ test('a settlement queued before stop and delivered after it is ignored', async 
   await agents.shutdown();
 });
 
+test('status is readable without copying history, and labels survive C1 sequences', async () => {
+  const agents = new Agents(() => {});
+  try {
+    const id = agents.spawn('\u009b31mred\u009b0m task', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
+    assert.equal(agents.status(id), 'starting');
+    await until(() => agents.status(id) === 'running');
+    assert.ok(!/\u009b/.test(agents.list()[0].task), 'C1 CSI cannot reach the viewer');
+    assert.throws(() => agents.status('nope'), /Unknown subagent/);
+  } finally { await agents.shutdown(); }
+});
+
 test('list labels are one line, escape-free and never split an emoji', async () => {
   const agents = new Agents(() => {});
   try {

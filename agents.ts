@@ -35,7 +35,7 @@ export function messageText(message?: RecordData): string {
 export function label(text: string): string {
   const plain = text
     .replace(/\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07/g, '')
-    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   return [...plain].slice(0, 100).join('');
@@ -105,6 +105,8 @@ export class Agents {
     }
   }
 
+  /** Current status without copying the conversation, for hot UI paths. */
+  status(id: string): Status { return this.get(id).status; }
   list() {
     return [...this.children.values()].map(c => ({ id: c.id, status: c.status, task: label(c.task) }));
   }

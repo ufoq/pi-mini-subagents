@@ -183,6 +183,51 @@ test('viewer keeps the input visible on short terminals and highlights truncated
   } finally { viewer.dispose(); await agents.shutdown(); }
 });
 
+test('viewer never hides intent behind status text or tiny heights, and drops stopped focus', async () => {
+  const agents = new Agents(() => {});
+  const id = agents.spawn('state task', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
+  const plain = { fg: (_: string, s: string) => s, bg: (_: string, s: string) => s, bold: (s: string) => s };
+  const wait = async (fn: () => boolean) => {
+    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    assert.fail('condition not reached');
+  };
+  const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 24 } }, plain, () => {}, process.cwd(), id);
+  try {
+    await wait(() => agents.status(id) === 'running');
+    viewer.focused = true;
+    // Guidance is not masked by transient feedback.
+    viewer.status = 'Input accepted by j1.';
+    const tall = viewer.render(80).join('\n');
+    assert.match(tall, /may finish first/, 'guidance survives feedback');
+    assert.match(tall, /Input accepted by j1\./, 'feedback is still shown');
+    // Short terminals carry the state next to the composer instead.
+    const short: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 5 } }, plain, () => {}, process.cwd(), id);
+    try {
+      assert.match(short.render(80).join('\n'), /live > /, 'running state is visible without the status line');
+      short.focused = true;
+      short.handleInput('\u0018'); // Ctrl+X -> stop
+      await wait(() => agents.status(id) === 'stopped');
+      const stopped = short.render(80).join('\n');
+      assert.match(stopped, /stopped > /, 'stopped state is visible');
+      assert.equal(short.input.focused, false, 'a stopped child drops input focus');
+    } finally { short.dispose(); }
+    // Geometry sweep: every sampled size fits the cap and keeps the composer.
+    for (const rows of [1, 2, 3, 5, 8, 12]) {
+      for (const width of [8, 16, 31, 32, 60]) {
+        for (const withId of [true, false]) {
+          const sized: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows } }, plain, () => {}, process.cwd(), withId ? id : undefined);
+          try {
+            const lines = sized.render(width);
+            assert.ok(lines.length <= Math.max(1, Math.floor(rows * 0.9)), `cap at ${rows}x${width}`);
+            assert.ok(lines.every((line: string) => visibleWidth(line) <= width), `width at ${rows}x${width}`);
+            if (withId) assert.match(lines.join('\n'), /> /, `composer at ${rows}x${width}`);
+          } finally { sized.dispose(); }
+        }
+      }
+    }
+  } finally { viewer.dispose(); await agents.shutdown(); }
+});
+
 test('viewer late attach/live tools/scroll/narrow widths/steering/close-reopen use same registry', async () => {
   let rpc: RpcProcess;
   const notices: any[] = [];

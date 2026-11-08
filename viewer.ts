@@ -60,18 +60,17 @@ export class AgentViewer {
     return text.split(/(\x1b\[0m)/).map(part => part === '\x1b[0m' ? part : this.theme.bg('selectedBg', part)).join('');
   }
   /** States what Enter does, so a finished child is not mistaken for a live steer. */
-  private guidance() {
-    return this.mode() === 'steer' ? 'Enter steers this child.'
-      : this.mode() === 'message' ? 'Enter starts a new turn in this conversation.'
+  private guidance(mode = this.mode()) {
+    return mode === 'steer' ? 'Enter sends to this child now; it may finish first.'
+      : mode === 'message' ? 'Enter starts a new turn in this conversation.'
         : 'Stopped; Esc returns to the list.';
   }
   private hint(width: number, tiers: string[]) {
     return this.theme.fg('dim', tiers.find(text => visibleWidth(text) <= width) ?? tiers.at(-1)!);
   }
   /** What Enter would do for the highlighted child right now; derived, never cached. */
-  private mode(): 'steer' | 'message' | 'stopped' {
-    const status = this.selected ? this.agents.snapshot(this.selected).status : 'running';
-    return status === 'stopped' ? 'stopped' : status === 'starting' || status === 'running' ? 'steer' : 'message';
+  private mode(): Mode {
+    return modeOf(this.selected ? this.agents.status(this.selected) : 'running');
   }
   invalidate() { this.dirty = true; this.content.invalidate(); this.input.invalidate(); }
   private back() {
@@ -160,19 +159,23 @@ export class AgentViewer {
     // A custom overlay's render() owns the viewport, so clip its rendered lines here.
     // Reserve title, hint and input first; the hint and status line are the only
     // things that may be dropped when the terminal is extremely short.
+    const mode = modeOf(snapshot.status);
+    this.input.focused = this.focused && mode !== 'stopped';
     const showHint = height >= 3;
     const showStatus = height >= 5;
     const viewport = Math.max(0, height - 2 - (showHint ? 1 : 0) - (showStatus ? 1 : 0));
+    // Below the status line's threshold the composer carries a one-word state tag.
+    const compact = width >= 16 && height > 1 && !showStatus ? `${mode === 'steer' ? 'live' : mode === 'message' ? 'idle' : 'stopped'} ` : '';
     // A one-row terminal can only show one thing; the composer is the actionable one.
-    if (height === 1) return this.input.render(width).map(fit);
+    if (height === 1) return this.input.render(width).map((line: string) => fit(compact + line));
     const lines = this.scroll.render(width);
     this.scroll.updateLayout(lines.length, Math.max(1, viewport), () => this.tui.requestRender());
     return [
       fit(this.theme.bold(this.theme.fg('accent', `${snapshot.id} ${snapshot.status} — ${snapshot.task.replace(/\s+/g, ' ')}`))),
       ...lines.slice(this.scroll.scrollTop, this.scroll.scrollTop + viewport).map(fit),
       ...(showHint ? [fit(this.hint(width, ['PgUp/PgDn scroll · Ctrl+Y live · Ctrl+X stop · Esc list', 'PgUp/PgDn · Ctrl+Y · Ctrl+X · Esc', 'Ctrl+X stop · Esc']))] : []),
-      ...(showStatus ? [fit(this.status || snapshot.error || this.guidance())] : []),
-      ...this.input.render(width).map(fit),
+      ...(showStatus ? [fit([snapshot.error, this.guidance(mode), this.status].filter(Boolean).join(' · '))] : []),
+      ...this.input.render(width).map((line: string) => fit(compact + line)),
     ];
   }
 
@@ -209,6 +212,11 @@ export class AgentViewer {
     // Executions can start before a finalized assistant/tool-result message.
     for (const activity of Object.values(snapshot.tools)) showTool(activity);
   }
+}
+
+type Mode = 'steer' | 'message' | 'stopped';
+function modeOf(status: string): Mode {
+  return status === 'stopped' ? 'stopped' : status === 'starting' || status === 'running' ? 'steer' : 'message';
 }
 
 export async function openViewer(agents: Agents, ctx: ExtensionContext, id?: string) {

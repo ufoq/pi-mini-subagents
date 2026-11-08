@@ -11,7 +11,7 @@ export function completionNotification(id: string, status: Status) {
 export function parseModel(spec?: string): { provider: string; id: string } | undefined {
   if (spec === undefined) return undefined;
   // Control characters (notably NUL) cannot be passed to a subprocess argv.
-  if (/[\u0000-\u001f\u007f]/.test(spec)) throw new Error('model must not contain control characters.');
+  if (/[\u0000-\u001f\u007f-\u009f]/.test(spec)) throw new Error('model must not contain control characters.');
   const match = /^([^/\s]+)\/(\S.*)$/.exec(spec.trim());
   if (!match) throw new Error('model must be "provider/model", for example "anthropic/claude-sonnet-4-5".');
   return { provider: match[1], id: match[2].trim() };

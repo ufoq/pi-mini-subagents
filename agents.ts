@@ -11,7 +11,7 @@ export interface Snapshot {
   messages: RecordData[]; streaming?: RecordData; tools: Record<string, ToolActivity>;
   result?: string; error?: string;
 }
-interface Child extends Snapshot { rpc: RpcProcess; ready: Promise<void> }
+interface Child extends Snapshot { rpc: RpcProcess; ready: Promise<void>; held?: boolean }
 type ProcessFactory = (spec: Invocation, event: (e: RecordData) => void, failure: (e: Error) => void) => RpcProcess;
 
 export function childInvocation(cwd: string, model?: { provider: string; id: string }, thinking?: string): Invocation {
@@ -55,15 +55,18 @@ export class Agents {
     if (this.closing) throw new Error('Subagent registry is shutting down.');
     const id = `j${++this.sequence}`;
     const child = { id, task: message, status: 'starting', messages: [], tools: {} } as Child;
-    let rpc: RpcProcess;
+    // Register first so a process factory that calls back synchronously can be
+    // observed; hold notifications until launch has actually succeeded.
+    child.held = true;
+    this.children.set(id, child);
     try {
-      rpc = this.createProcess(invocation, event => this.event(child, event), error => this.failed(child, error));
+      child.rpc = this.createProcess(invocation, event => this.event(child, event), error => this.failed(child, error));
     } catch (error) {
       // e.g. invalid argv: never retain a child that owns no process.
+      this.children.delete(id);
       throw new Error(`Could not start ${id}: ${error instanceof Error ? error.message : String(error)}`);
     }
-    child.rpc = rpc;
-    this.children.set(id, child);
+    child.held = false;
     child.ready = this.start(child, message);
     this.changed(id);
     return id;
@@ -156,7 +159,7 @@ export class Agents {
     c.status = 'failed'; c.error = String(error instanceof Error ? error.message : error); c.streaming = undefined;
     interruptTools(c, 'Child process/command failed before tool completed.');
     this.changed(c.id);
-    if (!this.closing) this.notify(c.id, c.status);
+    if (!this.closing && !c.held) this.notify(c.id, c.status);
   }
 
   private event(c: Child, e: RecordData) {
@@ -187,7 +190,7 @@ export class Agents {
         c.status = c.error ? 'failed' : 'finished';
         c.streaming = undefined;
         this.changed(c.id);
-        if (!this.closing) this.notify(c.id, c.status);
+        if (!this.closing && !c.held) this.notify(c.id, c.status);
         return;
       }
     }

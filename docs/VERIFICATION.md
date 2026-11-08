@@ -232,8 +232,12 @@ Covered by:
 - Regression tests that a child whose process cannot be constructed (e.g. invalid
   argv) is not retained: spawn reports an actionable error, `list` stays empty and
   shutdown does not touch a half-registered child. A second case covers a factory
-  that reports failure synchronously and then throws: the child is discarded and
-  no completion notification is emitted for an id the caller never received.
+  that reports failure synchronously and then throws: the child is discarded, the
+  completion notification is discarded with it, and observers never see the
+  provisional entry. A third case covers a factory that reports failure
+  synchronously but still returns a process: the child is retained and its single
+  failure completion is published after launch, so it is neither lost nor emitted
+  for an unknown id.
 
 This is an optional per-spawn argument, not a role/agent-definition registry; the
 rest of the launch configuration stays fixed.

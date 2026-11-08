@@ -11,7 +11,7 @@ export interface Snapshot {
   messages: RecordData[]; streaming?: RecordData; tools: Record<string, ToolActivity>;
   result?: string; error?: string;
 }
-interface Child extends Snapshot { rpc: RpcProcess; ready: Promise<void>; held?: boolean }
+interface Child extends Snapshot { rpc: RpcProcess; ready: Promise<void>; held?: boolean; dirty?: boolean; pending?: Status[] }
 type ProcessFactory = (spec: Invocation, event: (e: RecordData) => void, failure: (e: Error) => void) => RpcProcess;
 
 export function childInvocation(cwd: string, model?: { provider: string; id: string }, thinking?: string): Invocation {
@@ -66,7 +66,10 @@ export class Agents {
       this.children.delete(id);
       throw new Error(`Could not start ${id}: ${error instanceof Error ? error.message : String(error)}`);
     }
+    // Launch succeeded: publish everything a synchronous factory callback queued.
     child.held = false;
+    if (child.dirty) { child.dirty = false; this.changed(id); }
+    for (const status of child.pending?.splice(0) ?? []) this.complete(id, status);
     child.ready = this.start(child, message);
     this.changed(id);
     return id;
@@ -150,6 +153,9 @@ export class Agents {
     return child;
   }
   private changed(id: string) {
+    const child = this.children.get(id);
+    // A provisional child is not published until its process exists.
+    if (child?.held) { child.dirty = true; return; }
     for (const listener of [...this.listeners]) {
       try { listener(id); } catch (error) { console.error('Subagent observer failed:', error); }
     }
@@ -159,7 +165,15 @@ export class Agents {
     c.status = 'failed'; c.error = String(error instanceof Error ? error.message : error); c.streaming = undefined;
     interruptTools(c, 'Child process/command failed before tool completed.');
     this.changed(c.id);
-    if (!this.closing && !c.held) this.notify(c.id, c.status);
+    this.complete(c.id, c.status);
+  }
+
+  /** Completion is delivered once, after launch, never for a discarded child. */
+  private complete(id: string, status: Status) {
+    if (this.closing) return;
+    const child = this.children.get(id);
+    if (child?.held) { (child.pending ??= []).push(status); return; }
+    this.notify(id, status);
   }
 
   private event(c: Child, e: RecordData) {
@@ -190,7 +204,7 @@ export class Agents {
         c.status = c.error ? 'failed' : 'finished';
         c.streaming = undefined;
         this.changed(c.id);
-        if (!this.closing && !c.held) this.notify(c.id, c.status);
+        this.complete(c.id, c.status);
         return;
       }
     }

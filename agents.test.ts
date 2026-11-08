@@ -135,15 +135,35 @@ test('a child whose process cannot be constructed is never retained', async () =
   await agents.shutdown(); // must not touch a half-registered child
 });
 
+test('a synchronous failure from a factory that still returns a process is delivered after launch', async () => {
+  const notices: any[] = [];
+  const observed: string[][] = [];
+  const agents = new Agents((id, status) => notices.push({ id, status }), (_spec, _event, failure) => {
+    failure(new Error('spawn failed synchronously'));
+    return { request: async () => { throw new Error('unreachable'); }, stop: async () => {} } as any;
+  });
+  const id = agents.spawn('task', invocation);
+  agents.subscribe(() => observed.push(agents.list().map(c => `${c.id} ${c.status}`)));
+  assert.equal(id, 'j1');
+  assert.deepEqual(agents.list().map(c => `${c.id} ${c.status}`), ['j1 failed']);
+  await until(() => notices.length === 1);
+  assert.deepEqual(notices, [{ id: 'j1', status: 'failed' }]);
+  assert.match(agents.read('j1'), /spawn failed synchronously/);
+  await agents.shutdown();
+});
+
 test('a factory that fails synchronously before throwing emits no notification', async () => {
   const notices: any[] = [];
+  const observed: string[][] = [];
   const agents = new Agents((id, status) => notices.push({ id, status, readable: agents.read(id) }), (_spec, _event, failure) => {
     failure(new Error('spawn failed synchronously'));
     throw new Error('factory threw after reporting failure');
   });
+  agents.subscribe(() => observed.push(agents.list().map(c => `${c.id} ${c.status}`)));
   assert.throws(() => agents.spawn('task', invocation), /Could not start j1: factory threw/);
   assert.deepEqual(agents.list(), []);
   assert.equal(notices.length, 0, 'no completion for a child id the caller never received');
+  assert.deepEqual(observed, [], 'a discarded child is never published to observers');
   await agents.shutdown();
 });
 

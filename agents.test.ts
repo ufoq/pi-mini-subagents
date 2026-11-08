@@ -231,6 +231,17 @@ test('a settlement queued before stop and delivered after it is ignored', async 
   await agents.shutdown();
 });
 
+test('list labels are one line, escape-free and never split an emoji', async () => {
+  const agents = new Agents(() => {});
+  try {
+    const id = agents.spawn(`\x1b[31m${'a'.repeat(99)}🙂\u0007 tail`, { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
+    const task = agents.list().find(c => c.id === id)!.task;
+    assert.ok(!/\x1b|\u0007|\n/.test(task), 'escape and control characters are stripped');
+    assert.equal([...task].length, 100, 'bounded by code points');
+    assert.ok(task.endsWith('🙂'), 'emoji at the boundary is not split');
+  } finally { await agents.shutdown(); }
+});
+
 test('a failed launch still consumes its id, so ids stay monotonic', async () => {
   let calls = 0;
   const agents = new Agents(() => {}, () => {

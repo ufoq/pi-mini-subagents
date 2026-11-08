@@ -15,7 +15,8 @@ export class AgentViewer {
   private done: () => void;
   private cwd: string;
   private selected?: string;
-  private index = 0;
+  private cursor?: string;
+  private inputMode: 'steer' | 'message' | 'stopped' = 'steer';
   private input = new Input({ prompt: 'Steer> ', placeholder: 'Enter sends to this child' });
   private content = new Container();
   private scroll = new ScrollView(this.content, { follow: 'end', scrollbar: 'hidden' });
@@ -36,6 +37,7 @@ export class AgentViewer {
     });
     this.input.onSubmit = message => {
       if (!this.selected || !message.trim()) return;
+      if (this.inputMode === 'stopped') { this.status = `${this.selected} is stopped; it cannot take more input.`; return; }
       const id = this.selected;
       this.input.setValue('');
       this.status = `Sending to ${id}…`;
@@ -44,11 +46,38 @@ export class AgentViewer {
     this.input.onEscape = () => this.back();
   }
   get focused() { return this._focused; }
-  set focused(value: boolean) { this._focused = value; this.input.focused = value && !!this.selected; }
+  set focused(value: boolean) { this._focused = value; this.input.focused = value && !!this.selected && this.inputMode !== 'stopped'; }
 
   dispose() { this.unsubscribe(); }
   /** Newest child first, so a fresh spawn is at the top of the list. */
   private rows() { return [...this.agents.list()].reverse(); }
+  /** The highlighted row is tracked by id, so inserts never move the cursor. */
+  private listIndex(rows = this.rows()) {
+    const found = this.cursor ? rows.findIndex(c => c.id === this.cursor) : -1;
+    return found >= 0 ? found : 0;
+  }
+  private hint(width: number, tiers: string[]) {
+    return this.theme.fg('dim', tiers.find(text => visibleWidth(text) <= width) ?? tiers.at(-1)!);
+  }
+  /** The input label states what Enter will do for this child's current state. */
+  private syncInput() {
+    const status = this.selected ? this.agents.snapshot(this.selected).status : 'running';
+    const mode = status === 'stopped' ? 'stopped' : status === 'starting' || status === 'running' ? 'steer' : 'message';
+    if (mode === this.inputMode && this.input) { this.input.focused = this.focused && !!this.selected && mode !== 'stopped'; return; }
+    this.inputMode = mode;
+    const options = mode === 'steer'
+      ? { prompt: 'Steer> ', placeholder: 'Enter steers this child' }
+      : mode === 'message'
+        ? { prompt: 'Message> ', placeholder: 'Enter starts a new turn' }
+        : { prompt: 'Stopped> ', placeholder: 'Stopped; Esc goes back' };
+    const value = this.input.getValue();
+    const input = new Input(options);
+    input.onSubmit = this.input.onSubmit;
+    input.onEscape = this.input.onEscape;
+    input.setValue(value);
+    input.focused = this.focused && !!this.selected && mode !== 'stopped';
+    this.input = input;
+  }
   invalidate() { this.dirty = true; this.content.invalidate(); this.input.invalidate(); }
   private back() {
     if (this.selected) { this.selected = undefined; this.input.focused = false; this.status = ''; }
@@ -60,10 +89,11 @@ export class AgentViewer {
     if (matchesKey(data, Key.escape)) { this.back(); return; }
     if (!this.selected) {
       const rows = this.rows();
-      if (matchesKey(data, Key.up)) this.index = Math.max(0, this.index - 1);
-      else if (matchesKey(data, Key.down)) this.index = Math.min(rows.length - 1, this.index + 1);
-      else if (matchesKey(data, Key.enter) && rows[this.index]) {
-        this.selected = rows[this.index].id; this.dirty = true; this.input.focused = this.focused; this.scroll.scrollToEnd();
+      const index = this.listIndex(rows);
+      if (matchesKey(data, Key.up)) this.cursor = rows[Math.max(0, index - 1)]?.id;
+      else if (matchesKey(data, Key.down)) this.cursor = rows[Math.min(rows.length - 1, index + 1)]?.id;
+      else if (matchesKey(data, Key.enter) && rows[index]) {
+        this.selected = rows[index].id; this.dirty = true; this.syncInput(); this.scroll.scrollToEnd();
       }
     } else if (matchesKey(data, Key.pageUp)) this.scroll.scrollBy(-Math.max(1, this.scroll.viewportHeight - 1));
     else if (matchesKey(data, Key.pageDown)) this.scroll.scrollBy(Math.max(1, this.scroll.viewportHeight - 1));
@@ -72,7 +102,7 @@ export class AgentViewer {
       const id = this.selected;
       this.status = `Stopping ${id}…`;
       void this.agents.stop(id).then(() => { this.status = `${id} stopped.`; }, error => { this.status = String(error); }).finally(() => this.tui.requestRender());
-    } else this.input.handleInput(data);
+    } else if (this.inputMode !== 'stopped') this.input.handleInput(data);
     this.tui.requestRender();
   }
 
@@ -106,16 +136,19 @@ export class AgentViewer {
     const pad = (line: string) => { const text = fit(line); return text + ' '.repeat(Math.max(0, width - visibleWidth(text))); };
     if (!this.selected) {
       const rows = this.rows();
-      this.index = Math.max(0, Math.min(this.index, rows.length - 1));
-      const start = Math.max(0, this.index - height + 3);
+      const index = this.listIndex(rows);
+      this.cursor = rows[index]?.id;
+      const start = Math.max(0, index - height + 3);
       return [this.theme.bold(this.theme.fg('accent', `Subagents — existing conversations${rows.length ? ` (${rows.length})` : ''}`)),
         ...(rows.length ? rows.slice(start, start + height - 2).map((c, i) => {
-          const line = `${start + i === this.index ? '> ' : '  '}${c.id} ${c.status}: ${c.task}`;
-          return start + i === this.index ? this.theme.bg('selectedBg', pad(line)) : pad(line);
+          const row = start + i === index;
+          const line = `${row ? '> ' : '  '}${c.id} ${c.status}: ${c.task}`;
+          return row ? this.theme.bg('selectedBg', pad(line)) : pad(line);
         }) : ['No children. Ask the parent to use subagent spawn.']),
-        this.theme.fg('dim', '↑↓ select · Enter open · Esc close (children keep running)'),
+        this.hint(width, ['↑↓ select · Enter open · Esc close (children keep running)', '↑↓ select · Enter open · Esc close', '↑↓ · Enter · Esc']),
       ].map(fit);
     }
+    this.syncInput();
     const snapshot = this.agents.snapshot(this.selected);
     if (this.dirty) {
       this.rebuild(snapshot); this.dirty = false;
@@ -128,7 +161,7 @@ export class AgentViewer {
     return [
       fit(this.theme.bold(this.theme.fg('accent', `${snapshot.id} ${snapshot.status} — ${snapshot.task.replace(/\s+/g, ' ')}`))),
       ...lines.slice(this.scroll.scrollTop, this.scroll.scrollTop + viewport).map(fit),
-      fit(this.theme.fg('dim', 'PgUp/PgDn scroll · Ctrl+Y live · Ctrl+X stop · Esc list')),
+      fit(this.hint(width, ['PgUp/PgDn scroll · Ctrl+Y live · Ctrl+X stop · Esc list', 'PgUp/PgDn · Ctrl+Y · Ctrl+X · Esc', 'Ctrl+X stop · Esc'])),
       fit(this.status || snapshot.error || ''),
       ...this.input.render(width).map(fit),
     ];

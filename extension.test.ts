@@ -69,6 +69,55 @@ test('viewer lists newest subagents first', async () => {
   } finally { viewer.dispose(); await agents.shutdown(); }
 });
 
+test('viewer keeps its cursor, states input intent and fits narrow hints', async () => {
+  const agents = new Agents(() => {});
+  const first = agents.spawn('first task', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
+  const second = agents.spawn('second task', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
+  const ansi = { fg: (_: string, s: string) => `\x1b[36m${s}\x1b[0m`, bg: (_: string, s: string) => `\x1b[48;5;24m${s}\x1b[0m`, bold: (s: string) => `\x1b[1m${s}\x1b[0m` };
+  const tui = { requestRender() {}, terminal: { rows: 24 } };
+  const wait = async (fn: () => boolean) => {
+    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    assert.fail('condition not reached');
+  };
+  const viewer: any = new AgentViewer(agents, tui, ansi, () => {}, process.cwd());
+  try {
+    // Cursor starts on the newest child, then moves to the older one.
+    assert.match(viewer.render(60).join('\n'), new RegExp(`> ${second} `));
+    viewer.focused = true; viewer.handleInput('\u001b[B');
+    assert.match(viewer.render(60).join('\n'), new RegExp(`> ${first} `));
+    // A new child must not steal the highlight.
+    const third = agents.spawn('third task', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
+    assert.match(viewer.render(60).join('\n'), new RegExp(`> ${first} `), 'inserts keep the cursor on the same id');
+    // Enter opens the highlighted child, not the newest one.
+    viewer.handleInput('\r');
+    assert.match(viewer.render(60).join('\n'), new RegExp(`${first} `));
+    // Selection highlight covers the full inner width even when the label truncates.
+    viewer.handleInput('\u001b'); // back to the list
+    const row = viewer.render(40).find((line: string) => line.includes('\x1b[48;5;24m'));
+    const highlight = /\x1b\[48;5;24m([\s\S]*?)\x1b\[0m/.exec(row!)?.[1] ?? '';
+    assert.equal(visibleWidth(highlight), 36, 'highlight spans border-padded inner width');
+    // Finished children get a new-turn label; stopped ones accept no typing.
+    const rpc = (agents as any).children.get(first).rpc;
+    await rpc.request('finish'); await rpc.request('settle');
+    await wait(() => agents.snapshot(first).status === 'finished');
+    viewer.handleInput('\r');
+    assert.match(viewer.render(60).join('\n'), /Message> /, 'finished child starts a new turn');
+    await agents.stop(first);
+    assert.match(viewer.render(60).join('\n'), /Stopped> /);
+    const before = agents.snapshot(first).messages.length;
+    viewer.handleInput('should not be typed'); viewer.handleInput('\r');
+    assert.equal(agents.snapshot(first).messages.length, before, 'stopped child takes no input');
+    // Narrow widths keep a hint that fits, and never exceed the width.
+    viewer.handleInput('\u001b');
+    for (const width of [12, 30]) {
+      const lines = viewer.render(width);
+      assert.ok(lines.every((line: string) => visibleWidth(line) <= width));
+      assert.match(lines.map((l: string) => l.replace(/\x1b\[[0-9;]*m/g, '')).join('\n'), /↑/, 'a navigation hint survives narrow widths');
+    }
+    assert.ok(third);
+  } finally { viewer.dispose(); await agents.shutdown(); }
+});
+
 test('viewer late attach/live tools/scroll/narrow widths/steering/close-reopen use same registry', async () => {
   let rpc: RpcProcess;
   const notices: any[] = [];

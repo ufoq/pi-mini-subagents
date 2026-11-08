@@ -31,6 +31,15 @@ export function messageText(message?: RecordData): string {
   if (typeof message.content === 'string') return message.content;
   return (message.content ?? []).map((c: RecordData) => c.type === 'text' ? c.text : c.type === 'toolCall' ? `${c.name} ${JSON.stringify(c.arguments)}` : '').filter(Boolean).join('\n');
 }
+/** One line, no terminal escapes/control characters, at most 100 code points. */
+export function label(text: string): string {
+  const plain = text
+    .replace(/\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07/g, '')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return [...plain].slice(0, 100).join('');
+}
 const bounded = (text: string) => text.length <= 8000 ? text : text.slice(0, 8000) + '\n[truncated; full conversation in /agents]';
 function requireMessage(message: string) {
   if (typeof message !== 'string' || !message.trim()) throw new Error('A non-empty message is required.');
@@ -83,7 +92,8 @@ export class Agents {
       const state = await child.rpc.request('get_state');
       child.sessionId = state.sessionId;
       const history = await child.rpc.request('get_messages');
-      child.messages = history.messages ?? [];
+      // Live events can land while history is in flight; keep both, history first.
+      child.messages = [...(history.messages ?? []), ...child.messages];
       if (child.status !== 'starting') return;
       child.status = 'running';
       this.changed(child.id);
@@ -96,7 +106,7 @@ export class Agents {
   }
 
   list() {
-    return [...this.children.values()].map(c => ({ id: c.id, status: c.status, task: c.task.replace(/\s+/g, ' ').slice(0, 100) }));
+    return [...this.children.values()].map(c => ({ id: c.id, status: c.status, task: label(c.task) }));
   }
 
   snapshot(id: string): Snapshot {

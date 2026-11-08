@@ -240,7 +240,11 @@ Covered by:
   for an unknown id. Further cases cover a callback queued by a factory that then
   throws (never reaches observers or the parent), a throwing completion notifier
   (the retained child survives), and startup never overwriting a synchronous
-  terminal state with `running` or submitting work for it.
+  terminal state with `running` or submitting work for it. Viewer coverage pins the
+  newest-first list, a cursor that stays on its id when new children arrive, the
+  full-width selection highlight at truncating widths, state-specific input labels
+  (`Steer>`, `Message>`, `Stopped>`), narrow-width hints that always fit, and
+  model-facing list labels that are escape-free, one line and code-point bounded.
 
 This is an optional per-spawn argument, not a role/agent-definition registry; the
 rest of the launch configuration stays fixed.

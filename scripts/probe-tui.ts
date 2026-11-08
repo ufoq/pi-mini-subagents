@@ -54,7 +54,7 @@ try {
   assert.equal(mock.childPending.length, 1);
   const beforeReopen = raw.length;
   input('/agents j1\r');
-  await until(() => stripVTControlCharacters(raw.slice(beforeReopen)).includes('Steer>'), 'reopen same child');
+  await until(() => /(?:Steer|Message)> /.test(stripVTControlCharacters(raw.slice(beforeReopen))), 'reopen same child');
   command({ type: 'resize', rows: 24, columns: 40 });
   input('\u001b[5~'); input('\u001b[6~');
   await new Promise(r => setTimeout(r, 100));
@@ -75,7 +75,7 @@ try {
   await until(() => stripVTControlCharacters(raw.slice(beforeFollowup)).includes('NOTICE_SEEN'), 'follow-up completion');
   input('/agents j1\r');
   const beforeStop = raw.length;
-  await until(() => stripVTControlCharacters(raw.slice(beforeStop)).includes('Steer>'), 'open to stop');
+  await until(() => /(?:Steer|Message|Stopped)> /.test(stripVTControlCharacters(raw.slice(beforeStop))), 'open to stop');
   input('\u0018');
   await until(() => output().includes('j1 stopped'), 'human explicit stop');
   await closeViewer(); input('/quit\r');

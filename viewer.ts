@@ -4,7 +4,7 @@ import {
   type ExtensionContext, type Theme, type ToolRenderers,
 } from '@earendil-works/pi-coding-agent';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
-import { Container, Input, Text, ScrollView, matchesKey, Key, truncateToWidth, type TUI } from '@earendil-works/pi-tui';
+import { Container, Input, Text, ScrollView, matchesKey, Key, truncateToWidth, visibleWidth, type TUI } from '@earendil-works/pi-tui';
 import { Agents, messageText, type Snapshot, type ToolActivity } from './agents.ts';
 
 /** Uses public Pi renderers; no child transcript enters parent context. */
@@ -77,14 +77,42 @@ export class AgentViewer {
   }
 
   render(width: number): string[] {
-    const height = Math.max(3, this.tui.terminal.rows - 6);
+    // Room for the overlay's own margins plus a one-cell border and padding.
+    const framed = width >= 32;
+    const height = Math.max(3, this.tui.terminal.rows - 6 - (framed ? 4 : 0));
+    const inner = framed ? Math.max(1, width - 4) : width;
+    const body = this.body(inner, height);
+    if (!framed) return body;
+    // A plain overlay composites as an unpadded block; this frame gives it edges and
+    // breathing room, matching the bordered dialogs Pi itself renders.
+    const bar = this.theme.fg('border', '│');
+    const span = Math.max(1, width - 2);
+    const blank = bar + ' '.repeat(width - 2) + bar;
+    const row = (line: string) => {
+      const text = truncateToWidth(line, inner);
+      return bar + ' ' + text + ' '.repeat(Math.max(0, inner - visibleWidth(text))) + ' ' + bar;
+    };
+    return [
+      this.theme.fg('border', `╭${'─'.repeat(span)}╮`),
+      blank,
+      ...body.map(row),
+      blank,
+      this.theme.fg('border', `╰${'─'.repeat(span)}╯`),
+    ];
+  }
+
+  private body(width: number, height: number): string[] {
     const fit = (line: string) => truncateToWidth(line, width);
+    const pad = (line: string) => { const text = fit(line); return text + ' '.repeat(Math.max(0, width - visibleWidth(text))); };
     if (!this.selected) {
       const rows = this.rows();
       this.index = Math.max(0, Math.min(this.index, rows.length - 1));
       const start = Math.max(0, this.index - height + 3);
-      return [this.theme.fg('accent', 'Subagents — existing conversations'),
-        ...(rows.length ? rows.slice(start, start + height - 2).map((c, i) => `${start + i === this.index ? '> ' : '  '}${c.id} ${c.status}: ${c.task}`) : ['No children. Ask the parent to use subagent spawn.']),
+      return [this.theme.bold(this.theme.fg('accent', `Subagents — existing conversations${rows.length ? ` (${rows.length})` : ''}`)),
+        ...(rows.length ? rows.slice(start, start + height - 2).map((c, i) => {
+          const line = `${start + i === this.index ? '> ' : '  '}${c.id} ${c.status}: ${c.task}`;
+          return start + i === this.index ? this.theme.bg('selectedBg', pad(line)) : pad(line);
+        }) : ['No children. Ask the parent to use subagent spawn.']),
         this.theme.fg('dim', '↑↓ select · Enter open · Esc close (children keep running)'),
       ].map(fit);
     }
@@ -98,7 +126,7 @@ export class AgentViewer {
     const viewport = Math.max(1, height - 4);
     this.scroll.updateLayout(lines.length, viewport, () => this.tui.requestRender());
     return [
-      fit(this.theme.fg('accent', `${snapshot.id} ${snapshot.status} — ${snapshot.task.replace(/\s+/g, ' ')}`)),
+      fit(this.theme.bold(this.theme.fg('accent', `${snapshot.id} ${snapshot.status} — ${snapshot.task.replace(/\s+/g, ' ')}`))),
       ...lines.slice(this.scroll.scrollTop, this.scroll.scrollTop + viewport).map(fit),
       fit(this.theme.fg('dim', 'PgUp/PgDn scroll · Ctrl+Y live · Ctrl+X stop · Esc list')),
       fit(this.status || snapshot.error || ''),

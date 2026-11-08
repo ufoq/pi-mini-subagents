@@ -52,11 +52,15 @@ test('viewer lists newest subagents first', async () => {
   const agents = new Agents(() => {});
   const first = agents.spawn('first task', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
   const second = agents.spawn('second task', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
-  const theme = { fg: (_: string, s: string) => s };
+  // ANSI-emitting theme: padding and truncation must still be exact at terminal widths.
+  const theme = { fg: (_: string, s: string) => `\x1b[36m${s}\x1b[0m`, bg: (_: string, s: string) => `\x1b[48;5;24m${s}\x1b[0m`, bold: (s: string) => `\x1b[1m${s}\x1b[0m` };
   const tui = { requestRender() {}, terminal: { rows: 24 } };
   const viewer: any = new AgentViewer(agents, tui, theme, () => {}, process.cwd());
   try {
     const lines = viewer.render(100);
+    assert.ok(lines[0].includes('╭') && lines.at(-1)!.includes('╰'), 'wide overlay is framed');
+    assert.ok(lines.every((line: string) => visibleWidth(line) === 100), 'frame fills the requested width');
+    assert.ok(lines.slice(2, -2).every((line: string) => line.includes('│')), 'content rows are bordered');
     const order = lines.map((line: string) => /\(j\d\)|j\d/.exec(line)?.[0]).filter(Boolean);
     assert.deepEqual(order.slice(0, 2), [second, first], 'newest child on top');
     // ↓ selects the second row, which is now the older child.
@@ -70,7 +74,7 @@ test('viewer late attach/live tools/scroll/narrow widths/steering/close-reopen u
   const notices: any[] = [];
   const agents = new Agents((...args) => notices.push(args), (spec, event, failure) => rpc = new RpcProcess(spec, event, failure));
   const id = agents.spawn('task', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
-  const theme = { fg: (_: string, s: string) => s };
+  const theme = { fg: (_: string, s: string) => s, bg: (_: string, s: string) => s, bold: (s: string) => s };
   const tui = { requestRender() {}, terminal: { rows: 24 } };
   const wait = async (fn: () => boolean) => {
     for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }

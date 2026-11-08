@@ -20,7 +20,7 @@ or a shared blueprint.
 | State | One plain in-memory registry of child handles and conversation/progress data. No custom state/result directories or daemon. |
 | Initial context | Fresh conversation plus the parent's task brief; parent model/thinking by default, with an optional per-spawn `model: "provider/model"` override. No transcript fork. |
 | Tools and permissions | Ordinary coding tools. Parent states allowed actions, read-only intent, file ownership, etc. in the task prompt. No permission profiles or enforcement machinery. Prompt restrictions are instructions, not a sandbox. |
-| Resources | Do not automatically load every parent extension/MCP into children. No role registry or inheritance framework. |
+| Resources | Children inherit the parent's tools, skills, MCP, templates and themes, but not its extensions: only Pi's built-in MCP/codemode/tool-search support loads, so there is no `subagent` tool in a child and no recursion. No role registry or inheritance framework. |
 | Workspace | Same working directory. Parent coordinates assignments in prompts; no writer locks or automatic worktrees. |
 | Steering/follow-up | Send input to the same child using Pi's native prompt/steering behavior. A finished turn does not destroy the conversation. |
 | Observation | Child list, existing messages/tool activity, then live events. Agent and human controls use the same registry. Human viewing adds nothing to parent model context. |

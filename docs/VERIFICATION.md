@@ -262,7 +262,13 @@ Covered by:
 - A child with skills enabled advertises the inherited skill catalog in its system
   prompt (verified by capturing the provider request: `web-search/SKILL.md` and its
   description were present), while `--no-extensions` still leaves it without the
-  `subagent` tool. The
+  `subagent` tool.
+- MCP inheritance was checked against a minimal stdio MCP server with a synthetic
+  tool. With `-e builtin:mcp` and `direct` exposure the child advertises
+  `mcp__fake__ping`; with the default `codemode` exposure it advertises
+  `codemode`/`tool_search` instead, which reach the tool. Explicitly loading
+  `builtin:mcp` is required: `--no-extensions` alone disables MCP as well. No
+  `subagent` tool appears in either configuration. The
   busy-parent probe now waits for the child's own persisted transcript instead of a
   fixed sleep, and the status line shrinks its intent so a 20-column overlay still
   shows a failed child's diagnostic.

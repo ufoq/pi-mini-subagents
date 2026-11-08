@@ -52,14 +52,12 @@ session host is required for this slice.
 
 Children use the same Pi CLI/version, working directory, configured credentials,
 model and thinking level as the parent. Start fresh sessions, not transcript
-forks. Use all built-in coding tools (`read`, `bash`/`powershell`, `edit`, `write`,
-`grep`, `find`, `ls`) but no extension or MCP tools; parent prompts describe read-only intent,
-allowed files and task ownership. Those instructions are not a sandbox.
-
-Disable automatically loaded extensions, MCP, prompt templates and themes in
-children. Keep skills available so research skills (`web-search`) work there; they
-add instructions and paths, not new tools. Do not copy the parent's resource
-catalog or load our launcher again.
+forks. Inherit the parent's resources except extensions: all built-in coding tools
+(`read`, `bash`/`powershell`, `edit`, `write`, `grep`, `find`, `ls`), skills, MCP
+and prompt templates/themes. Load only Pi's built-in MCP/codemode/tool-search
+extensions, never discovered or user extensions, so a child has no `subagent`
+tool. Parent prompts describe read-only intent, allowed files and task ownership;
+those instructions are not a sandbox. Do not load our launcher in a child.
 Keep normal project-instruction discovery and Pi transcript storage. This is a
 small fixed launch configuration, not a role/permission/inheritance framework.
 

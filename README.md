@@ -112,13 +112,17 @@ controls are separate from the TUI for a later explicit adapter.
   `spawn` may override the model per child with `model: "provider/model"`
   (the rest of the launch configuration is fixed). Follow-up reuses that child.
   No parent-transcript fork.
-- Children use all built-in coding tools: `read`, `bash` (`powershell` on
-  Windows), `edit`, `write`, `grep`, `find`, `ls`. Skills are inherited, so a
-  research skill such as `web-search` works in a child. Discovered extensions,
-  MCP, templates and themes stay disabled; project instruction discovery and
-  normal Pi transcript storage remain enabled. RPC children cannot answer Pi's
-  project-trust prompt, so trust-gated project skills load only when a saved
-  decision or `defaultProjectTrust` allows them; user-level skills always load.
+- Children inherit the parent's resources except extensions: all built-in coding
+  tools (`read`, `bash`/`powershell`, `edit`, `write`, `grep`, `find`, `ls`),
+  skills (so `web-search` works), MCP servers/tools, prompt templates and themes.
+  Only Pi's built-in MCP/codemode/tool-search extensions load — never discovered
+  or user extensions — so children have no `subagent` tool and cannot delegate.
+  Project instruction discovery and normal Pi transcript storage remain enabled.
+  RPC children cannot answer Pi's project-trust prompt, so trust-gated project
+  skills/settings load only when a saved decision or `defaultProjectTrust` allows
+  them; user-level resources always load. MCP defaults to `codemode` exposure, so
+  child MCP tools are reached through `codemode`/`tool_search` unless a server is
+  configured as `direct`.
 - **Prompt restrictions are not a sandbox.** State read-only intent, allowed
   files/actions and ownership in the task brief. Children can mutate the shared
   workspace and use the parent's configured credentials/network access.

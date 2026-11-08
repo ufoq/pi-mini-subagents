@@ -265,12 +265,17 @@ test('a failed launch still consumes its id, so ids stay monotonic', async () =>
   await agents.shutdown();
 });
 
-test('child CLI has fresh context, ordinary tools, explicit resources disabled, model/thinking defaults', () => {
+test('child CLI inherits parent resources except extensions, with all tools', () => {
   const spec = childInvocation('/tmp', { provider: 'provider', id: 'model' }, 'high');
-  for (const flag of ['--mode', '--no-extensions', '--no-mcp', '--no-prompt-templates', '--no-themes']) assert.ok(spec.args.includes(flag));
-  assert.ok(!spec.args.includes('--no-skills'), 'skills are inherited for research work');
+  assert.ok(spec.args.includes('--mode'));
+  assert.ok(spec.args.includes('--no-extensions'), 'extensions stay off, so no subagent tool');
+  for (const flag of ['--no-mcp', '--no-skills', '--no-prompt-templates', '--no-themes']) {
+    assert.ok(!spec.args.includes(flag), `${flag} would strip a parent resource`);
+  }
   const shell = process.platform === 'win32' ? 'powershell' : 'bash';
-  assert.ok(spec.args.includes(`read,${shell},edit,write,grep,find,ls`), 'all built-in tools, no extension tools');
+  assert.ok(spec.args.includes(`read,${shell},edit,write,grep,find,ls,codemode,tool_search,mcp__*`), 'all parent tools, including MCP');
+  assert.ok(spec.args.includes('builtin:mcp'), 'built-in MCP support is loaded explicitly');
+  assert.ok(!spec.args.includes('./index.ts') && !spec.args.includes('-e ./index.ts'), 'our extension never loads in a child');
   assert.ok(spec.args.includes('provider')); assert.ok(spec.args.includes('model')); assert.ok(spec.args.includes('high'));
   for (const flag of ['--continue', '--fork', '--no-context-files', '--no-session']) assert.ok(!spec.args.includes(flag));
 });

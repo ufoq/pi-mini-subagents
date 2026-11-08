@@ -15,10 +15,12 @@ interface Child extends Snapshot { rpc: RpcProcess; ready: Promise<void>; held?:
 type ProcessFactory = (spec: Invocation, event: (e: RecordData) => void, failure: (e: Error) => void) => RpcProcess;
 
 export function childInvocation(cwd: string, model?: { provider: string; id: string }, thinking?: string): Invocation {
-  // All built-in coding tools; no extension/MCP tools, so children cannot delegate.
   const shell = process.platform === 'win32' ? 'powershell' : 'bash';
-  // Skills stay on so children can use research skills; no extensions, so no delegation.
-  const args = ['--mode', 'rpc', '--no-extensions', '--no-mcp', '--no-prompt-templates', '--no-themes', '--tools', `read,${shell},edit,write,grep,find,ls`];
+  // Same resources as the parent except extensions: all built-in tools, skills,
+  // MCP, templates and themes. Only Pi's built-in MCP support is loaded, so the
+  // child never gets our extension and therefore cannot delegate.
+  const args = ['--mode', 'rpc', '--no-extensions', '-e', 'builtin:mcp', '-e', 'builtin:codemode', '-e', 'builtin:tool-search',
+    '--tools', `read,${shell},edit,write,grep,find,ls,codemode,tool_search,mcp__*`];
   if (model) args.push('--provider', model.provider, '--model', model.id);
   if (thinking) args.push('--thinking', thinking);
   // Use the same CLI as the parent when running a standard Node installation.

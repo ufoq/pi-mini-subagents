@@ -268,7 +268,8 @@ test('a failed launch still consumes its id, so ids stay monotonic', async () =>
 test('child CLI has fresh context, ordinary tools, explicit resources disabled, model/thinking defaults', () => {
   const spec = childInvocation('/tmp', { provider: 'provider', id: 'model' }, 'high');
   for (const flag of ['--mode', '--no-extensions', '--no-mcp', '--no-skills', '--no-prompt-templates', '--no-themes']) assert.ok(spec.args.includes(flag));
-  assert.ok(spec.args.includes('read,bash,edit,write'));
+  const shell = process.platform === 'win32' ? 'powershell' : 'bash';
+  assert.ok(spec.args.includes(`read,${shell},edit,write,grep,find,ls`), 'all built-in tools, no extension tools');
   assert.ok(spec.args.includes('provider')); assert.ok(spec.args.includes('model')); assert.ok(spec.args.includes('high'));
   for (const flag of ['--continue', '--fork', '--no-context-files', '--no-session']) assert.ok(!spec.args.includes(flag));
 });

@@ -112,7 +112,8 @@ controls are separate from the TUI for a later explicit adapter.
   `spawn` may override the model per child with `model: "provider/model"`
   (the rest of the launch configuration is fixed). Follow-up reuses that child.
   No parent-transcript fork.
-- Children use ordinary `read`, `bash`, `edit`, `write` tools. Discovered
+- Children use all built-in coding tools: `read`, `bash` (`powershell` on
+  Windows), `edit`, `write`, `grep`, `find`, `ls`. Discovered
   extensions, MCP, skills, templates and themes are disabled. Project instruction
   discovery and normal Pi transcript storage remain enabled.
 - **Prompt restrictions are not a sandbox.** State read-only intent, allowed

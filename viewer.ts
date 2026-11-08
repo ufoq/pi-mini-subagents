@@ -1,6 +1,7 @@
 import {
   AssistantMessageComponent, UserMessageComponent, ToolExecutionComponent,
   createReadToolDefinition, createBashToolDefinition, createEditToolDefinition, createWriteToolDefinition,
+  createGrepToolDefinition, createFindToolDefinition, createLsToolDefinition, createPowerShellToolDefinition,
   type ExtensionContext, type Theme, type ToolRenderers,
 } from '@earendil-works/pi-coding-agent';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
@@ -31,6 +32,7 @@ export class AgentViewer {
     if (id && agents.list().some(c => c.id === id)) this.selected = id;
     this.definitions = Object.fromEntries([
       createReadToolDefinition(cwd), createBashToolDefinition(cwd), createEditToolDefinition(cwd), createWriteToolDefinition(cwd),
+      createGrepToolDefinition(cwd), createFindToolDefinition(cwd), createLsToolDefinition(cwd), createPowerShellToolDefinition(cwd),
     ].map(d => [d.name, d]));
     this.unsubscribe = agents.subscribe(id => {
       if (!this.selected || this.selected === id) { this.dirty = true; this.snapshotCache = undefined; tui.requestRender(); }

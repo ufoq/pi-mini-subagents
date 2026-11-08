@@ -255,7 +255,10 @@ Covered by:
   cached snapshot instead of cloning the conversation. The composer assertions were
   checked against the pre-fix revision (`732b8b7`), which loses the caret marker and
   truncates the draft tail at 16–22 columns; `agents.test.ts` waits for the tool
-  result text itself rather than tool creation, removing an observed timing race. The
+  result text itself rather than tool creation, removing an observed timing race.
+- Children advertise every built-in coding tool (`read`, `bash`, `edit`, `write`,
+  `grep`, `find`, `ls`) and never `subagent`, so a child cannot delegate further.
+  Verified from the tool declarations a real child sends to the provider. The
   busy-parent probe now waits for the child's own persisted transcript instead of a
   fixed sleep, and the status line shrinks its intent so a 20-column overlay still
   shows a failed child's diagnostic.

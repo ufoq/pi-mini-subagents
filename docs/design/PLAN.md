@@ -52,7 +52,8 @@ session host is required for this slice.
 
 Children use the same Pi CLI/version, working directory, configured credentials,
 model and thinking level as the parent. Start fresh sessions, not transcript
-forks. Use ordinary coding tools; parent prompts describe read-only intent,
+forks. Use all built-in coding tools (`read`, `bash`/`powershell`, `edit`, `write`,
+`grep`, `find`, `ls`) but no extension or MCP tools; parent prompts describe read-only intent,
 allowed files and task ownership. Those instructions are not a sandbox.
 
 Disable automatically loaded extensions, MCP, skills, templates and themes in

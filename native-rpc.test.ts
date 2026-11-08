@@ -94,7 +94,9 @@ test('native RPC parent: immediate launch, idle wake, explicit read, busy follow
     const followup = childRequests.at(-1);
     assert.match(JSON.stringify(followup.messages), /MOCK_CHILD remember cobalt/);
     assert.match(JSON.stringify(followup.messages), /follow-up recall color/);
-    assert.deepEqual(followup.tools.map((t: any) => t.function.name).sort(), ['bash', 'edit', 'read', 'write']);
+    const shell = process.platform === 'win32' ? 'powershell' : 'bash';
+    assert.deepEqual(followup.tools.map((t: any) => t.function.name).sort(), [shell, 'edit', 'find', 'grep', 'ls', 'read', 'write'].sort());
+    assert.ok(!followup.tools.some((t: any) => t.function.name === 'subagent'), 'child cannot delegate');
     const count = settled();
     await prompt('STOP'); await until(() => settled() > count, 'explicit stop');
     assert.ok(events.some(e => e.type === 'tool_execution_end' && text(e).includes('j1 stopped')));

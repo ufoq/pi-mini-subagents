@@ -11,7 +11,7 @@ import { plain, sanitize, Agents, messageText, type Snapshot, type ToolActivity 
 function cleanValue(value: any): any {
   if (typeof value === 'string') return sanitize(value);
   if (Array.isArray(value)) return value.map(cleanValue);
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, cleanValue(item)]));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [sanitize(key), cleanValue(item)]));
   return value;
 }
 function cleanPart(part: any): any {
@@ -29,11 +29,14 @@ function cleanMessage(message: any): any {
   if (typeof clean.summary === 'string') clean.summary = sanitize(clean.summary);
   if (typeof clean.errorMessage === 'string') clean.errorMessage = sanitize(clean.errorMessage);
   if (typeof clean.toolName === 'string') clean.toolName = sanitize(clean.toolName);
+  if (clean.details !== undefined) clean.details = cleanValue(clean.details);
   return clean;
 }
 function cleanResult(result: any): any {
   if (!result) return result;
-  return { ...result, content: Array.isArray(result.content) ? result.content.map(cleanPart) : result.content };
+  const clean = cleanValue(result);
+  clean.content = Array.isArray(result.content) ? result.content.map(cleanPart) : result.content;
+  return clean;
 }
 
 /** Uses public Pi renderers; child text is sanitized before any renderer sees it. */
@@ -91,7 +94,7 @@ export class AgentViewer {
    * intent shrinks to one word so the error stays readable.
    */
   private statusLine(mode: Mode, error: string | undefined, width: number) {
-    const detail = [error ? sanitize(error) : '', sanitize(this.status)].filter(Boolean).join(' · ');
+    const detail = [error ? sanitize(error).replace(/\s+/g, ' ') : '', sanitize(this.status).replace(/\s+/g, ' ')].filter(Boolean).join(' · ');
     const intent = !detail || visibleWidth(intentOf(mode)) + 3 + 6 <= width ? intentOf(mode) : shortIntentOf(mode);
     return [intent, detail].filter(Boolean).join(' · ');
   }

@@ -51,13 +51,45 @@ function bounded(text: string, tail?: string) {
   const note = '\n[truncated; full conversation in /agents]';
   return text.slice(0, Math.max(0, LIMIT - suffix.length - note.length)) + note + suffix;
 }
-const ESCAPES = /(?:\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x9d[^\x07\x9c]*(?:\x07|\x9c)|\x1b[P^_][\s\S]*?(?:\x1b\\|\x07)|[\x90\x98\x9e\x9f][\s\S]*?\x9c|\x1b\[[0-?]*[ -/]*[@-~]|\x9b[0-?]*[ -/]*[@-~]|\x1b[()#][0-9A-Za-z]|\x1b[@-_]|\x9c)/g;
+function skipString(text: string, start: number) {
+  for (let i = start; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code === 0x07 || code === 0x9c) return i;
+    if (code === 0x1b && text.charCodeAt(i + 1) === 0x5c) return i + 1;
+  }
+  return text.length;
+}
+function skipCsi(text: string, start: number) {
+  for (let i = start; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code >= 0x40 && code <= 0x7e) return i;
+  }
+  return text.length;
+}
 /** Strip terminal escapes/control characters but preserve code spacing and newlines. */
 export function sanitize(text: string): string {
-  return text
-    .replace(ESCAPES, '')
-    .replace(/\r\n?/g, '\n')
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, '');
+  let out = '';
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code === 0x1b) {
+      const next = text.charCodeAt(i + 1);
+      if (next === 0x5d) i = skipString(text, i + 2);            // OSC
+      else if (next === 0x5b) i = skipCsi(text, i + 2);           // CSI
+      else if (next === 0x50 || next === 0x58 || next === 0x5e || next === 0x5f) i = skipString(text, i + 2); // DCS/SOS/PM/APC
+      else if (next === 0x28 || next === 0x29 || next === 0x23) i += 2; // charset
+      else i += 1;                                              // two-byte escape
+      continue;
+    }
+    if (code === 0x9d) { i = skipString(text, i + 1); continue; } // C1 OSC
+    if (code === 0x9b) { i = skipCsi(text, i + 1); continue; }     // C1 CSI
+    if (code === 0x90 || code === 0x98 || code === 0x9e || code === 0x9f) { i = skipString(text, i + 1); continue; }
+    if (code === 0x0a) { out += '\n'; continue; }
+    if (code === 0x09) { out += '\t'; continue; }
+    if (code === 0x0d) { if (text.charCodeAt(i + 1) === 0x0a) i++; out += '\n'; continue; }
+    if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) continue;
+    out += text[i];
+  }
+  return out;
 }
 const clip = (text: string, limit = 500) => {
   const value = sanitize(text);
@@ -67,7 +99,7 @@ const clip = (text: string, limit = 500) => {
 export function transcript(c: Snapshot): string {
   const lines: string[] = [];
   const recent = c.messages.slice(-8);
-  const shown = new Set(recent.filter(m => m.role === 'toolResult').map(m => m.toolCallId));
+  const shown = new Set(c.messages.filter(m => m.role === 'toolResult').map(m => m.toolCallId));
   for (const m of recent) {
     if (m.role === 'toolResult') {
       lines.push(`tool ${sanitize(String(m.toolName ?? '?'))}${m.isError ? ' (error)' : ''}: ${clip(messageText(m))}`);

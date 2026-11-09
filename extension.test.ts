@@ -381,6 +381,7 @@ test('viewer sanitizes child text, arguments and results before rendering', asyn
     const detail = viewer.render(100).join('\n');
     assert.match(detail, /INJECTED/);
     assert.match(detail, /PAYLOAD/);
+    assert.match(detail, /EDIT_PAYLOAD/, 'diff details reach the native renderer');
     assert.ok(!detail.includes('\x1b[2J'), 'CSI is stripped from child text and status');
     assert.ok(!detail.includes('\x1b]52'), 'OSC is stripped from tool arguments');
     assert.ok(!detail.includes('\x9b'), '8-bit CSI is stripped from tool results');

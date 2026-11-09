@@ -141,6 +141,10 @@ test('sanitize strips OSC/BEL/ST, CSI and controls without eating visible text',
   assert.equal(sanitize('a\x9d0;payload\x9c b\x9b2Jc\x90dcs\x9cd'), 'a bcd');
   assert.equal(plain('a\x1b]8;;https://example\x1b\\link\x1b]8;;\x1b\\ b'), 'alink b');
   assert.equal(label('\x9d0;payload\x9cvisible'), 'visible');
+  assert.equal(sanitize('a\x9d8;;u\x1b\\LINK\x9d8;;\x07z'), 'aLINKz');
+  assert.equal(sanitize('a\x1b]8;;u\x9cLINK\x1b]8;;\x9cz'), 'aLINKz');
+  assert.equal(sanitize('a\x1bPdcs\x9cVISIBLE'), 'aVISIBLE');
+  assert.equal(sanitize('a\x90dcs\x1b\\VISIBLE'), 'aVISIBLE');
 });
 
 test('transcript preserves code spacing and strips terminal escapes', () => {
@@ -149,6 +153,19 @@ test('transcript preserves code spacing and strips terminal escapes', () => {
     tools: {},
   };
   assert.match(transcript(snapshot), /go\("a  b"\)\n  indented X/);
+});
+
+test('historical completed tools do not crowd current activity out of a read', () => {
+  const messages = Array.from({ length: 30 }, (_, i) => ({
+    role: 'toolResult', toolCallId: `old${i}`, toolName: 'bash', content: [{ type: 'text', text: `old output ${i}` }],
+  }));
+  const snapshot: any = {
+    status: 'running', messages,
+    tools: { current: { id: 'current', name: 'bash', args: { command: 'now' }, running: false, result: { content: [{ type: 'text', text: 'CURRENT OUTPUT' }] } } },
+  };
+  const text = transcript(snapshot);
+  assert.match(text, /tool bash: CURRENT OUTPUT/);
+  assert.ok(!text.includes('old output 0'), 'authoritative historical tools are not replayed as activity');
 });
 
 test('a completed parallel tool stays readable before its toolResult arrives', async () => {

@@ -13,7 +13,7 @@ name that was actually installed and tested at the time.
 - `./scripts/test rpc.test.ts`
 - `./scripts/test extension.test.ts`
 - `./scripts/test native-rpc.test.ts`
-- `./scripts/test` — **50 passing tests**, deterministic offline suite (includes real Pi processes
+- `./scripts/test` — **54 passing tests**, deterministic offline suite (includes real Pi processes
   against a loopback mock SSE endpoint; no external provider).
 - `node scripts/probe-tui.ts` — actual native TUI in a separate PTY with mock
   provider; successful logs in ignored `tmp/native-probe-UrcNNR/` and a later
@@ -389,6 +389,8 @@ reached the parent. The offline suite asserts that:
   unclosed diagnostic cannot hide a retry or expose a later payload;
 - unexecuted calls in errored/aborted assistant messages are marked as such and do not
   consume a later reused tool id's result;
+- thinking blocks are scanned for control-string state but never returned, including for
+  interrupted output; image metadata and details.diff share that same state;
 - the inherited model echo is sanitized before display;
 - child RPC errors are sanitized before they reach the parent tool renderer;
 - tool arguments are sanitized before JSON encoding, including image `mimeType` and

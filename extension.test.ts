@@ -1,5 +1,5 @@
 import { test } from 'node:test';
-import { rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { load } from './fixtures/pi-loader.ts';
 import { Agents } from './agents.ts';
@@ -404,6 +404,67 @@ test('a completed tool result already sanitized in messages is not scanned twice
   } finally { viewer.dispose(); await agents.shutdown(); }
 });
 
+test('viewer thinking state survives running, settled and stopped reads', async () => {
+  const agents = new Agents(() => {});
+  const plainTheme = { fg: (_: string, s: string) => s, bg: (_: string, s: string) => s, bold: (s: string) => s };
+  const id = agents.spawn('thinking split', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
+  const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 40 } }, plainTheme, () => {}, process.cwd(), id);
+  const wait = async (fn: () => boolean) => {
+    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    assert.fail('condition not reached');
+  };
+  try {
+    await wait(() => agents.status(id) === 'running');
+    await (agents as any).children.get(id).rpc.request('thinkingsplit');
+    await wait(() => agents.snapshot(id).messages.length >= 1);
+    let detail = viewer.render(120).join('\n');
+    assert.match(detail, /AFTER/);
+    assert.ok(!detail.includes('SECRET'), 'running viewer hides a payload opened in thinking');
+    await (agents as any).children.get(id).rpc.request('settle');
+    await wait(() => agents.status(id) === 'finished');
+    detail = viewer.render(120).join('\n');
+    assert.match(detail, /AFTER/);
+    assert.ok(!detail.includes('SECRET'), 'settled viewer hides a payload opened in thinking');
+    await agents.stop(id);
+    detail = viewer.render(120).join('\n');
+    assert.match(detail, /AFTER/);
+    assert.ok(!detail.includes('SECRET'), 'stopped viewer hides a payload opened in thinking');
+  } finally { viewer.dispose(); await agents.shutdown(); }
+});
+
+test('viewer interrupted thinking and result metadata share sanitizer state', async () => {
+  const agents = new Agents(() => {});
+  const plainTheme = { fg: (_: string, s: string) => s, bg: (_: string, s: string) => s, bold: (s: string) => s };
+  const wait = async (fn: () => boolean) => {
+    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    assert.fail('condition not reached');
+  };
+  const id = agents.spawn('interrupted thinking', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
+  const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 40 } }, plainTheme, () => {}, process.cwd(), id);
+  try {
+    await wait(() => agents.status(id) === 'running');
+    await (agents as any).children.get(id).rpc.request('interruptthinking');
+    await wait(() => agents.snapshot(id).streaming?.content?.length >= 2);
+    await agents.stop(id);
+    let detail = viewer.render(120).join('\n');
+    assert.match(detail, /AFTER/);
+    assert.ok(!detail.includes('SECRET'), 'interrupted thinking viewer hides its payload');
+
+    const second = new Agents(() => {});
+    const other = second.spawn('metadata result', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
+    const otherViewer: any = new AgentViewer(second, { requestRender() {}, terminal: { rows: 40 } }, plainTheme, () => {}, process.cwd(), other);
+    try {
+      await wait(() => second.status(other) === 'running');
+      await (second as any).children.get(other).rpc.request('metadataresult');
+      await wait(() => second.snapshot(other).messages.some(m => m.role === 'toolResult' && m.toolCallId === 'm1'));
+      detail = otherViewer.render(120).join('\n');
+      assert.match(detail, /BEFORE/);
+      assert.match(detail, /image\/png/);
+      assert.ok(!detail.includes('SECRET'), 'image metadata continues the shared text stream');
+    } finally { otherViewer.dispose(); await second.shutdown(); }
+  } finally { viewer.dispose(); await agents.shutdown(); }
+});
+
 test('failed diagnostics in the message and status line keep sanitizer state', async () => {
   const agents = new Agents(() => {});
   const plainTheme = { fg: (_: string, s: string) => s, bg: (_: string, s: string) => s, bold: (s: string) => s };
@@ -495,6 +556,7 @@ test('viewer sanitizes child text, arguments and results before rendering', asyn
     assert.fail('condition not reached');
   };
   try {
+    await mkdir('tmp', { recursive: true });
     await writeFile('tmp/preview-inject.txt', 'a\n\x1b[2JFILE_PAYLOAD\n');
     await wait(() => agents.status(id) === 'running');
     await (agents as any).children.get(id).rpc.request('inject');

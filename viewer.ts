@@ -8,27 +8,26 @@ import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { Container, Input, Text, ScrollView, matchesKey, Key, truncateToWidth, visibleWidth, type TUI } from '@earendil-works/pi-tui';
 import { plain, sanitize, createSanitizer, Agents, messageText, type Snapshot, type ToolActivity } from './agents.ts';
 
-function cleanValue(value: any): any {
-  if (typeof value === 'string') return sanitize(value);
-  if (Array.isArray(value)) return value.map(cleanValue);
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [sanitize(key), cleanValue(item)]));
+function cleanValue(value: any, cleanText: (text: string) => string = sanitize): any {
+  if (typeof value === 'string') return cleanText(value);
+  if (Array.isArray(value)) return value.map(item => cleanValue(item, cleanText));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [cleanText(key), cleanValue(item, cleanText)]));
   return value;
 }
 function cleanContent(content: any, cleanText: (text: string) => string): any {
   if (typeof content === 'string') return cleanText(content);
-  if (!Array.isArray(content)) return cleanValue(content);
-  const copies = content.map(part => part && typeof part === 'object' ? { ...part } : part);
-  const slots: Array<{ part: any; key: string }> = [];
-  for (const part of copies) {
-    if (!part || typeof part !== 'object') continue;
-    for (const key of ['text', 'thinking']) if (typeof part[key] === 'string') slots.push({ part, key });
-  }
-  for (const slot of slots) slot.part[slot.key] = cleanText(slot.part[slot.key]);
-  return copies.map(part => {
+  if (!Array.isArray(content)) return cleanValue(content, cleanText);
+  return content.map(part => {
     if (!part || typeof part !== 'object') return part;
     const clean = { ...part };
+    for (const key of ['text', 'thinking']) if (typeof part[key] === 'string') clean[key] = cleanText(part[key]);
     for (const [key, value] of Object.entries(part)) {
-      if (key !== 'text' && key !== 'thinking') clean[key] = cleanValue(value);
+      if (key === 'text' || key === 'thinking') continue;
+      // Only fields a renderer prints participate in the shared text stream;
+      // structural fields (type, ids) keep independent cleaning so an open
+      // control string cannot erase them.
+      const shown = key === 'mimeType' || key === 'name' || key === 'arguments' || key === 'partialArguments';
+      clean[key] = cleanValue(value, shown ? cleanText : sanitize);
     }
     return clean;
   });
@@ -39,7 +38,7 @@ function cleanMessage(message: any, cleanText: (text: string) => string): any {
   if (typeof clean.summary === 'string') clean.summary = cleanText(clean.summary);
   if (typeof clean.errorMessage === 'string') clean.errorMessage = cleanText(clean.errorMessage);
   if (typeof clean.toolName === 'string') clean.toolName = sanitize(clean.toolName);
-  if (clean.details !== undefined) clean.details = cleanValue(clean.details);
+  if (clean.details !== undefined) clean.details = cleanValue(clean.details, cleanText);
   return clean;
 }
 function cleanResult(result: any, cleanText: (text: string) => string): any {
@@ -47,7 +46,7 @@ function cleanResult(result: any, cleanText: (text: string) => string): any {
   const clean = { ...result };
   if (clean.content !== undefined) clean.content = cleanContent(clean.content, cleanText);
   for (const [key, value] of Object.entries(result)) {
-    if (key !== 'content') clean[key] = cleanValue(value);
+    if (key !== 'content') clean[key] = cleanValue(value, cleanText);
   }
   return clean;
 }
@@ -266,7 +265,7 @@ export class AgentViewer {
     const seenCalls = new Map<string, number>();
     const toolComponent = (rawName: string, id: string, args: any) => {
       const name = sanitize(rawName);
-      const tool = new ToolExecutionComponent(name, id, cleanValue(args), { showImages: false }, this.definitions[rawName] ?? this.definitions[name], this.tui, this.cwd);
+      const tool = new ToolExecutionComponent(name, id, args, { showImages: false }, this.definitions[rawName] ?? this.definitions[name], this.tui, this.cwd);
       // Observer snapshots do not own execution clocks. Marking execution started
       // would start native renderer timers with no public disposal hook on close.
       // The edit renderer rereads the file on args-complete, outside our sanitization.
@@ -292,7 +291,7 @@ export class AgentViewer {
       if (shownActivities.has(activity)) return;
       const hasCall = (seenCalls.get(activity.id) ?? 0) > 0;
       if (activity.reported && hasCall) return;
-      const tool = toolComponent(String(activity.name), activity.id, activity.args);
+      const tool = toolComponent(String(activity.name), activity.id, cleanValue(activity.args, cleanText));
       const fromMessages = hasCall ? undefined : resultsById.get(activity.id)?.at(-1);
       const raw = fromMessages ? undefined : activity.result;
       const result = fromMessages ?? (raw ? cleanResult(raw, cleanText) : undefined);
@@ -300,9 +299,10 @@ export class AgentViewer {
       shownActivities.add(activity);
       this.content.addChild(tool);
     };
-    const interrupted = snapshot.interrupted === undefined ? [] : [{
-      role: 'assistant', content: [{ type: 'text', text: cleanText(snapshot.interrupted) }], timestamp: 0, stopReason: 'aborted',
-    } as unknown as AssistantMessage];
+    const interruptedText = snapshot.interruptedMessage ? messageText(snapshot.interruptedMessage, cleanText) : snapshot.interrupted === undefined ? undefined : cleanText(snapshot.interrupted);
+    const interrupted = interruptedText ? [{
+      role: 'assistant', content: [{ type: 'text', text: interruptedText }], timestamp: 0, stopReason: 'aborted',
+    } as unknown as AssistantMessage] : [];
     for (const message of [...messages, ...interrupted, ...(streaming ? [streaming] : [])]) {
       if (message.role === 'user') this.content.addChild(new UserMessageComponent(messageText(message)));
       else if (message.role === 'assistant') {

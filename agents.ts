@@ -8,7 +8,7 @@ export interface ToolActivity {
 }
 export interface Snapshot {
   id: string; task: string; status: Status; sessionId?: string; model?: string;
-  messages: RecordData[]; streaming?: RecordData; interrupted?: string;
+  messages: RecordData[]; streaming?: RecordData; interrupted?: string; interruptedMessage?: RecordData;
   tools: Record<string, ToolActivity>; result?: string; error?: string;
 }
 interface Child extends Snapshot { rpc: RpcProcess; ready: Promise<void>; held?: boolean; dirty?: boolean; pending?: Status[] }
@@ -30,10 +30,17 @@ export function childInvocation(cwd: string, model?: { provider: string; id: str
   return { command: isPiCli ? process.execPath : 'pi', args: isPiCli ? [cli, ...args] : args, cwd };
 }
 
-export function messageText(message?: RecordData): string {
+export function messageText(message?: RecordData, clean?: (text: string) => string): string {
   if (!message) return '';
-  if (typeof message.content === 'string') return message.content;
-  return (message.content ?? []).filter((c: RecordData) => c.type === 'text').map((c: RecordData) => c.text).filter(Boolean).join('\n');
+  if (typeof message.content === 'string') return clean ? clean(message.content) : message.content;
+  const parts: string[] = [];
+  for (const c of message.content ?? []) {
+    if (c.type !== 'text' && c.type !== 'thinking') continue;
+    const raw = typeof c.text === 'string' ? c.text : typeof c.thinking === 'string' ? c.thinking : '';
+    const text = clean ? clean(raw) : raw;
+    if (c.type === 'text' && text) parts.push(text);
+  }
+  return parts.join('\n');
 }
 /** One line with no terminal escapes or control characters. */
 export function plain(text: string): string {
@@ -159,7 +166,7 @@ function prepareMessages(c: Snapshot, clean: (text: string) => string): Prepared
   let lastError: string | undefined;
   let lastErrorRaw: string | undefined;
   for (const message of c.messages) {
-    const text = clean(messageText(message));
+    const text = messageText(message, clean);
     const error = typeof message.errorMessage === 'string' ? clean(message.errorMessage) : undefined;
     rows.push({ message, text, error });
     if (message.role === 'assistant') lastAssistant = text;
@@ -188,8 +195,11 @@ export function transcript(c: Snapshot, prepared?: PreparedMessages, clean?: (te
       recentLines.push(`${sanitize(String(m.role ?? 'message'))}: ${trim(text)}`);
     }
   }
-  if (c.streaming) live.push(`assistant (streaming): ${trim(clean(messageText(c.streaming)))}`);
-  if (c.interrupted) live.push(`assistant (interrupted): ${trim(clean(c.interrupted))}`);
+  if (c.streaming) live.push(`assistant (streaming): ${trim(messageText(c.streaming, clean))}`);
+  if (c.interruptedMessage) {
+    const text = messageText(c.interruptedMessage, clean);
+    if (text) live.push(`assistant (interrupted): ${trim(text)}`);
+  } else if (c.interrupted) live.push(`assistant (interrupted): ${trim(clean(c.interrupted))}`);
   for (const tool of Object.values(c.tools)) {
     if (tool.reported) continue;
     const name = sanitize(String(tool.name));
@@ -325,7 +335,7 @@ export class Agents {
     const c = this.get(id);
     c.status = 'stopped';
     // Keep what the child had produced so stop-then-read is still useful.
-    if (c.streaming) c.interrupted = messageText(c.streaming);
+    if (c.streaming) { c.interrupted = messageText(c.streaming); c.interruptedMessage = c.streaming; }
     c.streaming = undefined;
     interruptTools(c, 'Stopped before tool completed.');
     this.changed(id);

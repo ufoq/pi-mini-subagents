@@ -74,6 +74,31 @@ process.stdin.on('data', chunk => {
         emit({ type: 'tool_execution_start', toolCallId: 'live', toolName: 'bash', args: { command: 'live' } });
         emit({ type: 'tool_execution_update', toolCallId: 'live', toolName: 'bash', partialResult: { content: [{ type: 'text', text: 'LIVE OUTPUT' }] } });
         reply({}); break;
+      case 'thinkingsplit':
+        message({ role: 'assistant', content: [
+          { type: 'thinking', thinking: '\x1b]52;c;' },
+          { type: 'text', text: 'SECRET\x07AFTER' },
+        ], timestamp: Date.now(), stopReason: 'stop' });
+        reply({}); break;
+      case 'interruptthinking':
+        emit({ type: 'message_start', message: assistant('', { content: [], stopReason: 'pending' }) });
+        for (const assistantMessageEvent of [
+          { type: 'thinking_start', contentIndex: 0 },
+          { type: 'thinking_delta', contentIndex: 0, delta: '\x1b]52;c;' },
+          { type: 'text_start', contentIndex: 1 },
+          { type: 'text_delta', contentIndex: 1, delta: 'SECRET\x07AFTER' },
+        ]) emit({ type: 'message_update', assistantMessageEvent });
+        reply({}); break;
+      case 'metadataresult':
+        emit({ type: 'tool_execution_start', toolCallId: 'm1', toolName: 'bash', args: { command: 'metadata' } });
+        emit({ type: 'tool_execution_end', toolCallId: 'm1', toolName: 'bash', result: {
+          content: [{ type: 'text', text: 'BEFORE\x1b]52;c;' }, { type: 'image', mimeType: 'SECRET\x07image/png', data: 'AAAA' }],
+          details: { diff: 'SECRET\x07diff' },
+        }, isError: false });
+        message({ role: 'toolResult', toolCallId: 'm1', toolName: 'bash', content: [
+          { type: 'text', text: 'BEFORE\x1b]52;c;' }, { type: 'image', mimeType: 'SECRET\x07image/png', data: 'AAAA' },
+        ], details: { diff: 'SECRET\x07diff' }, isError: false });
+        reply({}); break;
       case 'diagnosticrecover':
         message(assistant('\x1b]52;c;', { stopReason: 'error', errorMessage: 'SECRET\x07AFTER' }));
         message(assistant('NORMAL_RESULT'));
@@ -85,7 +110,7 @@ process.stdin.on('data', chunk => {
         emit({ type: 'agent_settled', aborted: false });
         reply({}); break;
       case 'unexecuted':
-        message(assistant('', { content: [{ type: 'toolCall', id: 'u1', name: 'bash', arguments: { command: 'NEVER' } }], stopReason: 'error', errorMessage: 'not executed' }));
+        message(assistant('', { content: [{ type: 'toolCall', id: 'u1', name: 'bash', arguments: { command: 'NEVER' } }], stopReason: 'aborted', errorMessage: 'not executed' }));
         message(assistant('', { content: [{ type: 'toolCall', id: 'u1', name: 'bash', arguments: { command: 'RAN' } }], stopReason: 'toolUse' }));
         emit({ type: 'tool_execution_start', toolCallId: 'u1', toolName: 'bash', args: { command: 'RAN' } });
         emit({ type: 'tool_execution_end', toolCallId: 'u1', toolName: 'bash', result: { content: [{ type: 'text', text: 'RAN RESULT' }] }, isError: false });

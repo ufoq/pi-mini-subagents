@@ -216,6 +216,42 @@ test('a control string split across messages stays hidden in read', async () => 
   } finally { await agents.shutdown(); }
 });
 
+test('thinking participates in sanitizer state without being returned', async () => {
+  const { agents, processes } = setup();
+  try {
+    const id = agents.spawn('thinking split', invocation);
+    await until(() => agents.snapshot(id).status === 'running');
+    await processes[0].request('thinkingsplit');
+    await until(() => agents.snapshot(id).messages.length >= 1);
+    const running = agents.read(id);
+    assert.match(running, /AFTER/);
+    assert.ok(!running.includes('SECRET'), 'running read hides a payload opened in thinking');
+    await processes[0].request('settle');
+    await until(() => agents.status(id) === 'finished');
+    const settled = agents.read(id);
+    assert.match(settled, /AFTER/);
+    assert.ok(!settled.includes('SECRET'), 'settled read hides a payload opened in thinking');
+    await agents.stop(id);
+    const stopped = agents.read(id);
+    assert.match(stopped, /AFTER/);
+    assert.ok(!stopped.includes('SECRET'), 'stopped read hides a payload opened in thinking');
+  } finally { await agents.shutdown(); }
+});
+
+test('interrupted thinking carries sanitizer state into the stopped transcript', async () => {
+  const { agents, processes } = setup();
+  try {
+    const id = agents.spawn('interrupted thinking', invocation);
+    await until(() => agents.snapshot(id).status === 'running');
+    await processes[0].request('interruptthinking');
+    await until(() => agents.snapshot(id).streaming?.content?.length >= 2);
+    await agents.stop(id);
+    const text = agents.read(id);
+    assert.match(text, /AFTER/);
+    assert.ok(!text.includes('SECRET'), 'interrupted thinking does not expose its payload');
+  } finally { await agents.shutdown(); }
+});
+
 test('historical diagnostics are processed in message order for read', async () => {
   const first = setup();
   try {

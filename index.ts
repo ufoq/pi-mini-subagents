@@ -33,7 +33,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerTool({
     name: 'subagent', label: 'Subagent',
-    description: 'Persistent background Pi children in this cwd. spawn: task in message, optional model "provider/model" (default: parent model); list; read: result/error, usage, or attributed recent activity; send: steer/follow up in the same conversation; stop: terminate. Completion notifies without results. Put restrictions/file ownership in task prompts, not enforced here.',
+    description: 'Persistent background Pi children in this cwd. spawn: task in message, optional model "provider/model" (default: parent model); list; read: result/error or attributed recent activity; send: steer/follow up in the same conversation; stop: terminate. Completion notifies without results. Put restrictions/file ownership in task prompts, not enforced here.',
     parameters: Type.Object({
       action: StringEnum(['spawn', 'list', 'read', 'send', 'stop'] as const),
       id: Type.Optional(Type.String()),

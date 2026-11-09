@@ -28,6 +28,13 @@ process.stdin.on('data', chunk => {
         if (c.message === 'reject') { emit({ type: 'response', id: c.id, command: c.type, success: false, error: 'prompt rejected' }); break; }
         if (c.message === 'reject-inject') { emit({ type: 'response', id: c.id, command: c.type, success: false, error: 'bad \x9d52;c;SECRET\x9c' }); break; }
         if (active && c.streamingBehavior !== 'steer') throw new Error('must steer');
+        if (c.message === 'crashstream') {
+          emit({ type: 'agent_start' });
+          emit({ type: 'message_start', message: assistant('', { stopReason: 'pending' }) });
+          emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'PARTIAL ANSWER' } });
+          setTimeout(() => process.exit(7), 10);
+          break;
+        }
         reply({ disposition: active ? 'queued' : 'started' });
         message({ role: 'user', content: c.message, timestamp: Date.now() });
         if (active) { pending.push(c.message); break; }

@@ -216,6 +216,17 @@ test('a control string split across messages stays hidden in read', async () => 
   } finally { await agents.shutdown(); }
 });
 
+test('a transport failure keeps the partial streaming answer readable', async () => {
+  const { agents } = setup();
+  try {
+    const id = agents.spawn('crashstream', invocation);
+    await until(() => agents.status(id) === 'failed');
+    const text = agents.read(id);
+    assert.match(text, /PARTIAL ANSWER/);
+    assert.match(text, /failed: transcript retained/);
+  } finally { await agents.shutdown(); }
+});
+
 test('thinking participates in sanitizer state without being returned', async () => {
   const { agents, processes } = setup();
   try {

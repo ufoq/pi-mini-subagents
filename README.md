@@ -247,3 +247,7 @@ is included.
 Authoritative scope: [HANDOFF.md](HANDOFF.md), [DEFAULTS.md](docs/design/DEFAULTS.md),
 [FEATURES.md](docs/design/FEATURES.md), [PLAN.md](docs/design/PLAN.md). Research is
 optional reference material, not an additional feature checklist.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

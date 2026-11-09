@@ -300,6 +300,11 @@ export class Agents {
     const lastText = last ? messageText(last) : '';
     const error = c.error ? (c.error === prepared.lastErrorRaw ? prepared.lastError ?? '' : clean(c.error)) : '';
     const result = c.result ? (c.result === lastText ? prepared.lastAssistant ?? '' : clean(c.result)) : '';
+    if (c.status === 'failed') {
+      const shown = transcript(c, prepared, clean);
+      const retained = result && !shown.includes(trim(result)) ? result : '';
+      return bounded([header, error, retained, shown].filter(Boolean).join('\n'), 'failed: transcript retained in memory until parent shutdown');
+    }
     if (c.status === 'stopped') {
       const shown = transcript(c, prepared, clean);
       // The transcript already shows the latest assistant text, so avoid repeating it.
@@ -371,6 +376,7 @@ export class Agents {
   }
   private failed(c: Child, error: unknown) {
     if (c.status === 'stopped' || c.status === 'failed') return;
+    if (c.streaming) { c.interrupted = messageText(c.streaming); c.interruptedMessage = c.streaming; }
     c.status = 'failed'; c.error = String(error instanceof Error ? error.message : error); c.streaming = undefined;
     interruptTools(c, 'Child process/command failed before tool completed.');
     this.changed(c.id);

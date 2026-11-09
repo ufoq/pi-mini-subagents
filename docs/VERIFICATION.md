@@ -13,7 +13,7 @@ name that was actually installed and tested at the time.
 - `./scripts/test rpc.test.ts`
 - `./scripts/test extension.test.ts`
 - `./scripts/test native-rpc.test.ts`
-- `./scripts/test` — **29 passing tests**, deterministic offline suite (includes real Pi processes
+- `./scripts/test` — **30 passing tests**, deterministic offline suite (includes real Pi processes
   against a loopback mock SSE endpoint; no external provider).
 - `node scripts/probe-tui.ts` — actual native TUI in a separate PTY with mock
   provider; successful logs in ignored `tmp/native-probe-UrcNNR/` and a later
@@ -346,3 +346,23 @@ footer/editor extension combinations and a real-model native-TUI run.
   publication, automatic rollout, or exhaustive third-party UI compatibility.
 - Notification submission is not acknowledged consumption. Native delivery is
   reused; no retry/outbox ledger or special Escape handling is present.
+
+### Read attribution, usage reporting and completion wording (0.1.1 prep)
+
+A review of the public `0.1.0` artifact found that `read` on a running child
+returned unlabelled message/tool text and that child token/cost usage never
+reached the parent. The offline suite asserts that:
+
+- running `read` labels entries (`assistant:`, `tool bash:`, `user:`);
+- stopping mid-turn keeps the partial assistant text and recent tools readable;
+- the header shows the resolved model reported by `get_state`
+  (`j1 finished · fake-model/fake`);
+- the completion notice still contains no result body, and now says the child
+  stays alive until `subagent stop`.
+
+`spawn` now echoes the requested `provider/model` in its immediate reply, so a
+wrong model is visible before the child starts; `read` shows the resolved model
+once the child reports it. No registry-wide concurrency cap, idle reaper or
+budget was added: finished children remain until explicit stop or shutdown, which
+is documented as a limitation. The parent's own footer still excludes child
+spend, and no per-child usage accounting was added.

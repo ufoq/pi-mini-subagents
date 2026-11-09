@@ -1,6 +1,6 @@
 {
   "name": "@ufoq/pi-mini-subagents",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Small persistent, observable and steerable Pi RPC subagents",
   "type": "module",
   "repository": {

@@ -43,9 +43,13 @@ test('launch is immediate; late snapshot, live activity, steering and persistent
     await until(() => agents.snapshot(id).messages.some(m => m.content === 'correction'));
     await processes[0].request('finish');
     assert.equal(notices.length, 0, 'agent_end is not settlement');
+    const running = agents.read(id);
+    assert.match(running, /tool bash: done/, 'running read attributes tool output');
+    assert.match(running, /assistant: /, 'running read attributes assistant output');
     await processes[0].request('settle');
     assert.equal(agents.list()[0].status, 'finished');
     assert.match(notices[0].read, /SECRET RESULT/);
+    assert.match(notices[0].read, /^j1 finished · fake-model\/fake$/m);
     assert.ok(updates > 0);
     unsubscribe();
     const previousUpdates = updates;
@@ -111,6 +115,28 @@ test('streaming deltas are reconstructed, then replaced by authoritative message
     await processes[0].request('stream_end');
     assert.equal(agents.snapshot(id).streaming, undefined);
     assert.equal(agents.snapshot(id).messages.at(-1).content[0].text, 'FINAL authoritative message');
+  } finally { await agents.shutdown(); }
+});
+
+test('stopping keeps recent output readable, including a partial answer', async () => {
+  const { agents, processes, notices } = setup();
+  try {
+    const id = agents.spawn('stop me', invocation);
+    await until(() => agents.snapshot(id).status === 'running');
+    await processes[0].request('stream');
+    await until(() => agents.snapshot(id).streaming?.content?.[0]?.text === 'authoritative text');
+    await agents.stop(id);
+    const partial = agents.read(id);
+    assert.match(partial, /^j1 stopped · fake-model\/fake$/m);
+    assert.match(partial, /user: stop me/);
+    assert.match(partial, /assistant \(interrupted\): authoritative text/);
+    const second = agents.spawn('finished but not settled', invocation);
+    await until(() => agents.snapshot(second).status === 'running');
+    await processes[1].request('finish');
+    await agents.stop(second);
+    assert.match(agents.read(second), /tool bash: done/);
+    assert.match(agents.read(second), /SECRET RESULT/);
+    assert.equal(notices.length, 0, 'stop never emits completion');
   } finally { await agents.shutdown(); }
 });
 

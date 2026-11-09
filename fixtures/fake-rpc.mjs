@@ -21,7 +21,7 @@ process.stdin.on('data', chunk => {
     const c = JSON.parse(line);
     const reply = (data) => emit({ type: 'response', id: c.id, command: c.type, success: true, data });
     switch (c.type) {
-      case 'get_state': reply({ sessionId: 'fake-session' }); break;
+      case 'get_state': reply({ sessionId: 'fake-session', model: { provider: 'fake-model', id: 'fake' } }); break;
       case 'get_messages': reply({ messages }); break;
       case 'get_last_assistant_text': reply({ text: messages.findLast(m => m.role === 'assistant')?.content[0].text }); break;
       case 'prompt':

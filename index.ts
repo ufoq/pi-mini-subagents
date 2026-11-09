@@ -4,7 +4,7 @@ import { Type } from 'typebox';
 import { Agents, childInvocation, type Status } from './agents.ts';
 
 export function completionNotification(id: string, status: Status) {
-  return `<system-notification>\nSubagent ${id} ${status}. Result/diagnostic available; use subagent read when needed.\n</system-notification>`;
+  return `<system-notification>\nSubagent ${id} ${status}. Result/diagnostic available; use subagent read when needed. The child stays alive; subagent stop releases it.\n</system-notification>`;
 }
 
 /** "provider/model" (model ids may contain slashes); undefined keeps the parent model. */
@@ -33,7 +33,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerTool({
     name: 'subagent', label: 'Subagent',
-    description: 'Persistent background Pi children in this cwd. spawn: task in message, optional model "provider/model" (default: parent model); list; read: latest result/error or recent activity; send: steer/follow up in the same conversation; stop: terminate. Completion notifies without results. Put restrictions/file ownership in task prompts, not enforced here.',
+    description: 'Persistent background Pi children in this cwd. spawn: task in message, optional model "provider/model" (default: parent model); list; read: result/error, usage, or attributed recent activity; send: steer/follow up in the same conversation; stop: terminate. Completion notifies without results. Put restrictions/file ownership in task prompts, not enforced here.',
     parameters: Type.Object({
       action: StringEnum(['spawn', 'list', 'read', 'send', 'stop'] as const),
       id: Type.Optional(Type.String()),
@@ -46,7 +46,7 @@ export default function (pi: ExtensionAPI) {
       if (params.action === 'spawn') {
         const model = parseModel(params.model) ?? ctx.model;
         const id = a.spawn(params.message ?? '', childInvocation(ctx.cwd, model, ctx.thinkingLevel));
-        text = `${id} starting. Parent may continue; completion will notify. Results require read.`;
+        text = `${id} starting on ${model.provider}/${model.id}. Parent may continue; completion will notify. Results require read.`;
       } else if (params.action === 'list') {
         text = a.list().map(c => `${c.id} ${c.status}: ${c.task}`).join('\n') || 'No subagents.';
       } else {

@@ -7,9 +7,9 @@ export interface ToolActivity {
   id: string; name: string; args: RecordData; result?: RecordData; running: boolean; isError?: boolean;
 }
 export interface Snapshot {
-  id: string; task: string; status: Status; sessionId?: string;
-  messages: RecordData[]; streaming?: RecordData; tools: Record<string, ToolActivity>;
-  result?: string; error?: string;
+  id: string; task: string; status: Status; sessionId?: string; model?: string;
+  messages: RecordData[]; streaming?: RecordData; interrupted?: string;
+  tools: Record<string, ToolActivity>; result?: string; error?: string;
 }
 interface Child extends Snapshot { rpc: RpcProcess; ready: Promise<void>; held?: boolean; dirty?: boolean; pending?: Status[] }
 type ProcessFactory = (spec: Invocation, event: (e: RecordData) => void, failure: (e: Error) => void) => RpcProcess;
@@ -48,6 +48,33 @@ export function label(text: string): string {
   return [...plain(text)].slice(0, 100).join('');
 }
 const bounded = (text: string) => text.length <= 8000 ? text : text.slice(0, 8000) + '\n[truncated; full conversation in /agents]';
+const clip = (text: string, limit = 500) => {
+  const line = plain(text);
+  return [...line].length <= limit ? line : [...line].slice(0, limit).join('') + '…';
+};
+/** One attributed line per message/tool call, so `read` does not dump an unlabelled wall. */
+export function transcript(c: Snapshot): string {
+  const lines: string[] = [];
+  for (const m of c.messages.slice(-8)) {
+    if (m.role === 'toolResult') {
+      lines.push(`tool ${m.toolName ?? '?'}${m.isError ? ' (error)' : ''}: ${clip(messageText(m))}`);
+    } else if (m.role === 'assistant') {
+      const calls = (m.content ?? []).filter((x: RecordData) => x.type === 'toolCall').map((x: RecordData) => x.name);
+      const text = messageText(m);
+      lines.push(`assistant: ${clip(text || '(no text)')}${calls.length ? ` [called ${calls.join(', ')}]` : ''}`);
+    } else if (m.role === 'user') {
+      lines.push(`user: ${clip(messageText(m))}`);
+    } else {
+      lines.push(`${m.role ?? 'message'}: ${clip(messageText(m))}`);
+    }
+  }
+  if (c.streaming) lines.push(`assistant (streaming): ${clip(messageText(c.streaming))}`);
+  if (c.interrupted) lines.push(`assistant (interrupted): ${clip(c.interrupted)}`);
+  for (const tool of Object.values(c.tools)) {
+    if (tool.running) lines.push(`tool ${tool.name} (running): ${clip(JSON.stringify(tool.args))}${tool.result ? ` → ${clip(messageText(tool.result))}` : ''}`);
+  }
+  return lines.filter(Boolean).join('\n');
+}
 function requireMessage(message: string) {
   if (typeof message !== 'string' || !message.trim()) throw new Error('A non-empty message is required.');
 }
@@ -98,6 +125,7 @@ export class Agents {
       if (child.status !== 'starting') return;
       const state = await child.rpc.request('get_state');
       child.sessionId = state.sessionId;
+      if (state.model) child.model = `${state.model.provider}/${state.model.id}`;
       const history = await child.rpc.request('get_messages');
       // Live events can land while history is in flight; keep both, history first.
       child.messages = [...(history.messages ?? []), ...child.messages];
@@ -125,10 +153,12 @@ export class Agents {
 
   read(id: string): string {
     const c = this.get(id);
-    const header = `${id} ${c.status}`;
-    if (c.status !== 'running' && c.status !== 'starting') return bounded(`${header}\n${[c.error, c.result].filter(Boolean).join('\n') || '(no assistant result)'}`);
-    const tools = Object.values(c.tools).filter(t => t.running).map(t => `${t.name} ${JSON.stringify(t.args)}\n${messageText(t.result)}`).join('\n');
-    return bounded(`${header}\n${c.messages.slice(-4).map(messageText).join('\n')}\n${messageText(c.streaming)}\n${tools}`);
+    const header = `${id} ${c.status}${c.model ? ` · ${c.model}` : ''}`;
+    if (c.status === 'stopped') return bounded([header, c.error, c.result, transcript(c)].filter(Boolean).join('\n'));
+    if (c.status !== 'running' && c.status !== 'starting') {
+      return bounded([header, c.error, c.result].filter(Boolean).join('\n') || `${header}\n(no assistant result)`);
+    }
+    return bounded([header, transcript(c)].filter(Boolean).join('\n'));
   }
 
   async send(id: string, message: string): Promise<void> {
@@ -152,7 +182,10 @@ export class Agents {
 
   async stop(id: string): Promise<void> {
     const c = this.get(id);
-    c.status = 'stopped'; c.streaming = undefined;
+    c.status = 'stopped';
+    // Keep what the child had produced so stop-then-read is still useful.
+    c.interrupted = c.streaming ? messageText(c.streaming) : undefined;
+    c.streaming = undefined;
     interruptTools(c, 'Stopped before tool completed.');
     this.changed(id);
     await c.rpc.stop();

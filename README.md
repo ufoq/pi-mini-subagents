@@ -53,9 +53,9 @@ subagent({ action: "spawn" | "list" | "read" | "send" | "stop",
 
 | Action | Required input | Effect |
 | --- | --- | --- |
-| `spawn` | `message` task brief | Returns `j1`, etc. immediately, before startup/model completion. Optional `model` (`"provider/model"`) overrides the child's model for this child only; omitted means the parent's model. |
+| `spawn` | `message` task brief | Returns `j1 starting on provider/model` immediately, before startup completes. Optional `model` (`"provider/model"`) overrides the child's model for this child only; omitted means the parent's model. |
 | `list` | — | Short ids, states and task labels; no transcripts. |
-| `read` | `id` | Latest result/diagnostic; while running, recent messages/tools. Bounded to about 8,000 characters. |
+| `read` | `id` | Latest result/diagnostic, or an attributed transcript (`assistant:`, `tool bash:`, `user:`) while running or after stop. Bounded to about 8,000 characters. |
 | `send` | `id`, `message` | Same child/context. Native steering when busy, new turn when idle. |
 | `stop` | `id` | Explicitly terminates the owned process tree; id remains inspectable. |
 
@@ -69,7 +69,7 @@ On settlement or process failure, the only automatic parent-context message is:
 
 ```text
 <system-notification>
-Subagent j1 finished. Result/diagnostic available; use subagent read when needed.
+Subagent j1 finished. Result/diagnostic available; use subagent read when needed. The child stays alive; subagent stop releases it.
 </system-notification>
 ```
 
@@ -128,6 +128,10 @@ controls are separate from the TUI for a later explicit adapter.
 - Registry, results and live state are memory-only. Children are ephemeral
   (`--no-session`), so nothing is written to Pi's session storage. No result
   directories, mailboxes, recovery or resume API.
+- **Child spend is invisible to the parent's footer.** Subagent tokens/cost are
+  part of the same provider quota, but the parent's session cost display excludes
+  them because children are separate, ephemeral sessions. There is no per-child
+  usage accounting in this extension.
 - Explicit stop and normal `session_shutdown` (including session replacement/
   reload) clean up owned processes. Linux cleanup snapshots the live descendant
   tree as well as process groups, since Pi bash tools create detached groups.
@@ -222,9 +226,10 @@ See [docs/VERIFICATION.md](docs/VERIFICATION.md) for evidence/limitations and th
 Linux is the cleanup target; other OS process-tree behavior is not verified.
 Orderly stop/shutdown is covered, not recovery after parent SIGKILL/container
 loss, or deliberately daemonized/reparented descendants. There is no durable
-registry or cross-restart control. Histories stay in memory until parent shutdown,
-and the simple viewer rebuilds on updates; very large transcripts can cost memory
-and rendering time. Concurrent actors share native Pi steering semantics, not
+registry or cross-restart control. Finished children stay alive (and stoppable)
+until `subagent stop` or parent shutdown; there is no idle reaper or child cap.
+Histories stay in memory until parent shutdown, and the simple viewer rebuilds on
+updates; very large transcripts can cost memory and rendering time. Concurrent actors share native Pi steering semantics, not
 transactional task control. Providers installed only by a parent extension (or
 runtime-only credential overrides) are not automatically inherited. Existing
 third-party footer/editor extension combinations have not been exhaustively

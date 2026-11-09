@@ -8,7 +8,7 @@ Decisions: [DEFAULTS.md](DEFAULTS.md). Requirements: [FEATURES.md](FEATURES.md).
 
 ## 1. Project identity, goal and hard boundaries
 
-- Project name and intended npm package name: **`pi-mini-subagents`** (unscoped).
+- Repository project: **`pi-mini-subagents`**; npm package name: **`@ufoq/pi-mini-subagents`** (scoped, published with `access: public`).
 - Planned canonical upstream: **https://github.com/ufoq/pi-mini-subagents**.
 - A private development remote hosts the working copy. `upstream` uses
   `https://github.com/ufoq/pi-mini-subagents.git`.
@@ -234,7 +234,7 @@ extension runtime policy.
 
 ### E. Standalone packaging, without rollout
 
-- [x] Add minimal Pi package metadata with `name: "pi-mini-subagents"`, repository
+- [x] Add minimal Pi package metadata with `name: "@ufoq/pi-mini-subagents"`, repository
       URL `https://github.com/ufoq/pi-mini-subagents`, and the extension entry
       point; make the supported Pi version explicit. Do not use a scoped alias,
       private remote URL, or internal environment name as the package identity. No

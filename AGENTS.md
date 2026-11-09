@@ -14,12 +14,12 @@ slice simple; do not restart the architecture survey or adopt a framework.
 
 ## Project identity
 
-- Project and intended npm package name: `pi-mini-subagents` (unscoped).
+- Project name: `pi-mini-subagents` (repository). npm package: `@ufoq/pi-mini-subagents` (scoped, public).
 - Planned canonical upstream: `https://github.com/ufoq/pi-mini-subagents`.
 - `origin` is the private development remote. `upstream` points to the public
   GitHub repository; it is not an instruction to create/fetch/push that
   repository or publish.
-- Package metadata uses `name: "pi-mini-subagents"` and the GitHub upstream as
+- Package metadata uses `name: "@ufoq/pi-mini-subagents"` and the GitHub upstream as
   the repository URL, never a private remote address.
 
 ## Scope and safety

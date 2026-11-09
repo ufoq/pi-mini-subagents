@@ -1,7 +1,7 @@
 # Worker task: implement the simple first slice
 
 Updated: 2026-11-02
-Project and intended npm package: `pi-mini-subagents`
+Project: `pi-mini-subagents`; npm package: `@ufoq/pi-mini-subagents`
 Planned canonical upstream: `https://github.com/ufoq/pi-mini-subagents`
 `origin`: private development remote, not the canonical public repository.
 Working tree: this checkout.
@@ -47,7 +47,7 @@ public renderers; change provisional names/module splits if it reduces code.
 - Document commands, actual results, remaining limitations and usage.
 - Commit/push reviewable milestones to local `origin`. Do not install into other
   workers, push to public `upstream`, create the GitHub repo, or publish to npm
-  without an explicit publication step. Use `pi-mini-subagents` for package name
+  without an explicit publication step. Use `@ufoq/pi-mini-subagents` for package name
   and the GitHub upstream for package repository metadata when added.
 
 ## Scope limits

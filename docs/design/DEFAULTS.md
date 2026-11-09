@@ -14,7 +14,7 @@ or a shared blueprint.
 
 | Area | Decision |
 | --- | --- |
-| Project identity | Project/npm package: `pi-mini-subagents`. Planned canonical upstream: `https://github.com/ufoq/pi-mini-subagents`; local Git server is the development copy. |
+| Project identity | Repository project: `pi-mini-subagents`; npm package: `@ufoq/pi-mini-subagents`. Canonical upstream: `https://github.com/ufoq/pi-mini-subagents`; local Git server is the development copy. |
 | Packaging | Our own Pi extension, shared by exclusive native TUI and RPC parent modes. |
 | Workers | Persistent Pi RPC subprocesses. Launch returns an id immediately; parent keeps working. |
 | State | One plain in-memory registry of child handles and conversation/progress data. No custom state/result directories or daemon. |

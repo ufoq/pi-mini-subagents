@@ -7,8 +7,8 @@ No scheduler or orchestration framework.
 **Working vertical slice:** verified with Pi **1.4.0**, Node **24.20.0**, Linux.
 Native TUI and native RPC parents load the same extension; children are persistent
 Pi RPC processes. See [verification](#verification) for what was actually tested.
-Not published to npm or GitHub. Planned public upstream:
-https://github.com/ufoq/pi-mini-subagents. `origin` is the local development copy.
+Public package: `@ufoq/pi-mini-subagents`. Canonical upstream:
+https://github.com/ufoq/pi-mini-subagents. The development copy is `origin`.
 
 ## Try it without installing
 
@@ -31,12 +31,11 @@ public libraries and TypeScript loader. For isolated testing, add
 `--no-extensions --no-mcp --no-skills --no-prompt-templates --no-themes`; explicit
 `-e ./index.ts` still loads this extension.
 
-This task does **not** install into the running coding agent, alter its
-settings, or deploy to another environment. A deliberate future local installation
-can use `pi install /absolute/path/to/pi-mini-subagents`; remove that declaration
-with `pi remove /absolute/path/to/pi-mini-subagents`. With explicit loading,
-simply omit `-e` next time to disable it. `--no-extensions` disables installed/
-discovered extensions but intentionally does not disable explicit `-e` paths.
+A deliberate installation can use `pi install npm:@ufoq/pi-mini-subagents`, or
+`pi install /absolute/path/to/pi-mini-subagents` from a checkout; remove the
+declaration with the matching `pi remove …`. With explicit loading, simply omit
+`-e` next time to disable it. `--no-extensions` disables installed/discovered
+extensions but intentionally does not disable explicit `-e` paths.
 
 ## Model controls
 

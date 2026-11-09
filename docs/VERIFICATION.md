@@ -4,6 +4,10 @@ Checked 2026-11-02 in the project checkout of its dedicated development
 environment. Pi 1.4.0, Node 24.20.0, Linux. This is implementation evidence, not a
 claim of exhaustive production readiness.
 
+The npm package was later renamed from `pi-mini-subagents` to
+`@ufoq/pi-mini-subagents`. Historical sections below keep the old name as the
+name that was actually installed and tested at the time.
+
 ## Commands actually executed
 
 - `./scripts/test rpc.test.ts`

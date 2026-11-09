@@ -13,7 +13,7 @@ name that was actually installed and tested at the time.
 - `./scripts/test rpc.test.ts`
 - `./scripts/test extension.test.ts`
 - `./scripts/test native-rpc.test.ts`
-- `./scripts/test` — **55 passing tests**, deterministic offline suite (includes real Pi processes
+- `./scripts/test` — **59 passing tests**, deterministic offline suite (includes real Pi processes
   against a loopback mock SSE endpoint; no external provider).
 - `node scripts/probe-tui.ts` — actual native TUI in a separate PTY with mock
   provider; successful logs in ignored `tmp/native-probe-UrcNNR/` and a later
@@ -393,6 +393,11 @@ reached the parent. The offline suite asserts that:
   interrupted output; image metadata and details.diff share that same state;
 - the inherited model echo is sanitized before display;
 - a transport failure keeps the partial streaming answer and diagnostic readable;
+- a follow-up starting while the previous turn settles remains `running` once
+  `agent_start` arrives, and `read` follows the new turn rather than the old result;
+- failed reads retain a settled result longer than the 500-character preview and a
+  long interrupted answer beyond the preview clip;
+- a send whose child dies before `agent_start` does not expose the previous result;
 - the package declares the MIT license and ships a matching `LICENSE` file;
 - child RPC errors are sanitized before they reach the parent tool renderer;
 - tool arguments are sanitized before JSON encoding, including image `mimeType` and

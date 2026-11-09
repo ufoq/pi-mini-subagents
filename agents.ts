@@ -175,7 +175,7 @@ function prepareMessages(c: Snapshot, clean: (text: string) => string): Prepared
   return { rows, lastAssistant, lastError, lastErrorRaw };
 }
 /** One attributed line per message/tool call, so `read` does not dump an unlabelled wall. */
-export function transcript(c: Snapshot, prepared?: PreparedMessages, clean?: (text: string) => string): string {
+export function transcript(c: Snapshot, prepared?: PreparedMessages, clean?: (text: string) => string, fullInterrupted = false): string {
   if (!clean) clean = createSanitizer();
   if (!prepared) prepared = prepareMessages(c, clean);
   const live: string[] = [];
@@ -198,8 +198,8 @@ export function transcript(c: Snapshot, prepared?: PreparedMessages, clean?: (te
   if (c.streaming) live.push(`assistant (streaming): ${trim(messageText(c.streaming, clean))}`);
   if (c.interruptedMessage) {
     const text = messageText(c.interruptedMessage, clean);
-    if (text) live.push(`assistant (interrupted): ${trim(text)}`);
-  } else if (c.interrupted) live.push(`assistant (interrupted): ${trim(clean(c.interrupted))}`);
+    if (text) live.push(`assistant (interrupted): ${trim(text, fullInterrupted ? LIMIT : 500)}`);
+  } else if (c.interrupted) live.push(`assistant (interrupted): ${trim(clean(c.interrupted), fullInterrupted ? LIMIT : 500)}`);
   for (const tool of Object.values(c.tools)) {
     if (tool.reported) continue;
     const name = sanitize(String(tool.name));
@@ -301,9 +301,8 @@ export class Agents {
     const error = c.error ? (c.error === prepared.lastErrorRaw ? prepared.lastError ?? '' : clean(c.error)) : '';
     const result = c.result ? (c.result === lastText ? prepared.lastAssistant ?? '' : clean(c.result)) : '';
     if (c.status === 'failed') {
-      const shown = transcript(c, prepared, clean);
-      const retained = result && !shown.includes(trim(result)) ? result : '';
-      return bounded([header, error, retained, shown].filter(Boolean).join('\n'), 'failed: transcript retained in memory until parent shutdown');
+      const shown = transcript(c, prepared, clean, true);
+      return bounded([header, error, result, shown].filter(Boolean).join('\n'), 'failed: transcript retained in memory until parent shutdown');
     }
     if (c.status === 'stopped') {
       const shown = transcript(c, prepared, clean);
@@ -322,16 +321,18 @@ export class Agents {
     const c = this.get(id);
     await c.ready;
     if (c.status === 'stopped') throw new Error(`Subagent ${id} is stopped; spawn a new child.`);
-    const previous = { status: c.status, error: c.error, result: c.result };
-    c.status = 'running'; c.error = undefined; c.result = undefined;
-    this.changed(id);
+    const previous = { status: c.status, error: c.error, result: c.result, interrupted: c.interrupted, interruptedMessage: c.interruptedMessage };
+    // Do not surface the previous answer while a new turn is being submitted.
+    c.error = undefined; c.result = undefined; c.interrupted = undefined; c.interruptedMessage = undefined;
     try {
       const accepted = await c.rpc.request('prompt', { message, streamingBehavior: 'steer' });
       if (accepted.disposition === 'handled') throw new Error('Child prompt was handled without starting work.');
+      c.status = 'running';
+      this.changed(id);
     } catch (error) {
       // A rejected input is not proof that the already-running child failed.
       // Transport failures report themselves through onFailure instead.
-      if (c.status === 'running') { Object.assign(c, previous); this.changed(id); }
+      if (c.status === previous.status) { Object.assign(c, previous); this.changed(id); }
       throw new Error(sanitize(error instanceof Error ? error.message : String(error)));
     }
   }
@@ -401,6 +402,10 @@ export class Agents {
   private event(c: Child, e: RecordData) {
     if (c.status === 'stopped') return;
     switch (e.type) {
+      case 'agent_start':
+        c.status = 'running'; c.error = undefined; c.result = undefined;
+        c.interrupted = undefined; c.interruptedMessage = undefined;
+        break;
       case 'message_start':
         if (e.message.role === 'assistant') c.streaming = e.message;
         break;

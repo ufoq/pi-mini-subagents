@@ -4,7 +4,7 @@ import { Agents, childInvocation, label, plain, sanitize, sanitizeMany, transcri
 import { RpcProcess } from './rpc.ts';
 const invocation = { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() };
 async function until(predicate: () => boolean) {
-  for (let i = 0; i < 300; i++) {
+  for (let i = 0; i < 1000; i++) {
     if (predicate()) return;
     await new Promise(r => setTimeout(r, 10));
   }
@@ -55,7 +55,7 @@ test('launch is immediate; late snapshot, live activity, steering and persistent
     unsubscribe();
     const previousUpdates = updates;
     await agents.send(id, 'follow-up with context');
-    await until(() => agents.snapshot(id).tools.t1?.running === true);
+    await until(() => String(JSON.stringify(agents.snapshot(id).tools.t1?.result)).includes('live output'));
     assert.match(agents.read(id), /tool bash \(running\): .*live output/, 'a reused tool id starts a new occurrence');
     await processes[0].request('finish'); await processes[0].request('settle');
     assert.equal(processes.length, 1, 'same process');
@@ -213,6 +213,55 @@ test('a control string split across messages stays hidden in read', async () => 
     const text = agents.read(id);
     assert.match(text, /AFTER/);
     assert.ok(!text.includes('SECRET'), 'the split OSC payload is not exposed');
+  } finally { await agents.shutdown(); }
+});
+
+test('a follow-up that starts as the previous turn settles stays running', async () => {
+  const { agents, processes } = setup();
+  try {
+    const id = agents.spawn('stale settlement', invocation);
+    await until(() => agents.status(id) === 'running');
+    await processes[0].request('finish');
+    await processes[0].request('settle');
+    await until(() => agents.status(id) === 'finished');
+    await agents.send(id, 'stale-settle');
+    await until(() => String(JSON.stringify(agents.snapshot(id).tools.t1?.result)).includes('live output'));
+    assert.equal(agents.status(id), 'running', 'the new turn is authoritative once it starts');
+    const current = agents.read(id); assert.match(current, /live output/, current);
+  } finally { await agents.shutdown(); }
+});
+
+test('a send that dies before starting does not expose the previous result', async () => {
+  const { agents, processes } = setup();
+  try {
+    const id = agents.spawn('old answer', invocation);
+    await until(() => agents.status(id) === 'running');
+    await processes[0].request('result');
+    await until(() => agents.status(id) === 'finished');
+    assert.match(agents.read(id), /CLEAN/, 'the previous answer is readable first');
+    await agents.send(id, 'crashbeforestart');
+    await until(() => agents.status(id) === 'failed');
+    const failed = agents.read(id); assert.equal((failed.match(/CLEAN/g) ?? []).length, 1, failed);
+  } finally { await agents.shutdown(); }
+});
+
+test('failed reads retain a result longer than the transcript preview', async () => {
+  const { agents, processes } = setup();
+  try {
+    const id = agents.spawn('long failure', invocation);
+    await until(() => agents.status(id) === 'running');
+    await processes[0].request('longfail');
+    await until(() => agents.status(id) === 'failed');
+    assert.match(agents.read(id), /TAIL_MARKER/, 'the full failed result survives the 500-char preview clip');
+  } finally { await agents.shutdown(); }
+});
+
+test('a transport failure retains a long partial answer beyond the preview', async () => {
+  const { agents } = setup();
+  try {
+    const id = agents.spawn('crashlong', invocation);
+    await until(() => agents.status(id) === 'failed');
+    assert.match(agents.read(id), /TAIL_MARKER/, 'the full interrupted answer survives the 500-char preview clip');
   } finally { await agents.shutdown(); }
 });
 

@@ -28,6 +28,32 @@ process.stdin.on('data', chunk => {
         if (c.message === 'reject') { emit({ type: 'response', id: c.id, command: c.type, success: false, error: 'prompt rejected' }); break; }
         if (c.message === 'reject-inject') { emit({ type: 'response', id: c.id, command: c.type, success: false, error: 'bad \x9d52;c;SECRET\x9c' }); break; }
         if (active && c.streamingBehavior !== 'steer') throw new Error('must steer');
+        if (c.message === 'crashlong') {
+          emit({ type: 'agent_start' });
+          emit({ type: 'message_start', message: assistant('', { stopReason: 'pending' }) });
+          emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'A'.repeat(600) + '\nTAIL_MARKER' } });
+          setTimeout(() => process.exit(7), 10);
+          break;
+        }
+        if (c.message === 'crashbeforestart') {
+          reply({ disposition: 'started' });
+          setTimeout(() => process.exit(7), 20);
+          break;
+        }
+        if (c.message === 'stale-settle') {
+          reply({ disposition: 'started' });
+          message({ role: 'user', content: c.message, timestamp: Date.now() });
+          setTimeout(() => emit({ type: 'agent_settled', aborted: false }), 10);
+          setTimeout(() => {
+            active = true;
+            emit({ type: 'agent_start' });
+            emit({ type: 'message_start', message: assistant('', { stopReason: 'pending' }) });
+            message(assistant('starting', { content: [{ type: 'toolCall', id: 't1', name: 'bash', arguments: { command: 'second' } }], stopReason: 'toolUse' }));
+            emit({ type: 'tool_execution_start', toolCallId: 't1', toolName: 'bash', args: { command: 'second' } });
+            emit({ type: 'tool_execution_update', toolCallId: 't1', toolName: 'bash', partialResult: { content: [{ type: 'text', text: 'live output' }] } });
+          }, 60);
+          break;
+        }
         if (c.message === 'crashstream') {
           emit({ type: 'agent_start' });
           emit({ type: 'message_start', message: assistant('', { stopReason: 'pending' }) });
@@ -170,6 +196,9 @@ process.stdin.on('data', chunk => {
         message({ role: 'toolResult', toolCallId: 't1', toolName: 'bash', content: [{ type: 'text', text: 'done' }], isError: false });
         finish(); reply({}); break;
       case 'settle': emit({ type: 'agent_settled', aborted: false }); reply({}); break;
+      case 'longfail':
+        message(assistant('A'.repeat(600) + '\nTAIL_MARKER', { stopReason: 'error', errorMessage: 'provider unavailable' }));
+        active = false; emit({ type: 'agent_settled', aborted: false }); reply({}); break;
       case 'provider_error': message(assistant('', { stopReason: 'error', errorMessage: 'provider unavailable' })); active = false; emit({ type: 'agent_settled', aborted: false }); reply({}); break;
       case 'unicode': {
         const bytes = Buffer.from(JSON.stringify({ type: 'unicode', text: '中\u2028\u2029🙂' }) + '\r\n');

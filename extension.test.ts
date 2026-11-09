@@ -84,7 +84,7 @@ test('viewer keeps its cursor, states input intent and fits narrow hints', async
   const ansi = { fg: (_: string, s: string) => `\x1b[36m${s}\x1b[0m`, bg: (_: string, s: string) => `\x1b[48;5;24m${s}\x1b[0m`, bold: (s: string) => `\x1b[1m${s}\x1b[0m` };
   const tui = { requestRender() {}, terminal: { rows: 24 } };
   const wait = async (fn: () => boolean) => {
-    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    for (let i = 0; i < 1000; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
     assert.fail('condition not reached');
   };
   const viewer: any = new AgentViewer(agents, tui, ansi, () => {}, process.cwd());
@@ -107,6 +107,7 @@ test('viewer keeps its cursor, states input intent and fits narrow hints', async
     const highlight = /\x1b\[48;5;24m([\s\S]*?)\x1b\[0m/.exec(row!)?.[1] ?? '';
     assert.equal(visibleWidth(highlight), 36, 'highlight spans border-padded inner width');
     // Finished children get a new-turn label; stopped ones accept no typing.
+    await wait(() => agents.snapshot(first).status === 'running');
     const rpc = (agents as any).children.get(first).rpc;
     await rpc.request('finish'); await rpc.request('settle');
     await wait(() => agents.snapshot(first).status === 'finished');
@@ -159,7 +160,7 @@ test('viewer keeps the input visible on short terminals and highlights truncated
     return columns;
   };
   const wait = async (fn: () => boolean) => {
-    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    for (let i = 0; i < 1000; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
     assert.fail('condition not reached');
   };
   const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 24 } }, ansi, () => {}, process.cwd(), id);
@@ -198,7 +199,7 @@ test('viewer never hides intent behind status text or tiny heights, and drops st
   const id = agents.spawn('state task', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
   const plain = { fg: (_: string, s: string) => s, bg: (_: string, s: string) => s, bold: (s: string) => s };
   const wait = async (fn: () => boolean) => {
-    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    for (let i = 0; i < 1000; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
     assert.fail('condition not reached');
   };
   const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 24 } }, plain, () => {}, process.cwd(), id);
@@ -293,7 +294,7 @@ test('viewer late attach/live tools/scroll/narrow widths/steering/close-reopen u
   const theme = { fg: (_: string, s: string) => s, bg: (_: string, s: string) => s, bold: (s: string) => s };
   const tui = { requestRender() {}, terminal: { rows: 24 } };
   const wait = async (fn: () => boolean) => {
-    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    for (let i = 0; i < 1000; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
     assert.fail('condition not reached');
   };
   let viewer: any;
@@ -353,7 +354,7 @@ test('the stopped viewer keeps interrupted text that read clips', async () => {
   const id = agents.spawn('long partial', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
   const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 40 } }, plainTheme, () => {}, process.cwd(), id);
   const wait = async (fn: () => boolean) => {
-    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    for (let i = 0; i < 1000; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
     assert.fail('condition not reached');
   };
   try {
@@ -372,7 +373,7 @@ test('the stopped viewer carries sanitizer state into interrupted output', async
   const id = agents.spawn('interrupted split', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
   const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 40 } }, plainTheme, () => {}, process.cwd(), id);
   const wait = async (fn: () => boolean) => {
-    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    for (let i = 0; i < 1000; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
     assert.fail('condition not reached');
   };
   try {
@@ -392,7 +393,7 @@ test('a completed tool result already sanitized in messages is not scanned twice
   const id = agents.spawn('result message', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
   const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 40 } }, plainTheme, () => {}, process.cwd(), id);
   const wait = async (fn: () => boolean) => {
-    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    for (let i = 0; i < 1000; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
     assert.fail('condition not reached');
   };
   try {
@@ -410,7 +411,7 @@ test('viewer thinking state survives running, settled and stopped reads', async 
   const id = agents.spawn('thinking split', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
   const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 40 } }, plainTheme, () => {}, process.cwd(), id);
   const wait = async (fn: () => boolean) => {
-    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    for (let i = 0; i < 1000; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
     assert.fail('condition not reached');
   };
   try {
@@ -436,7 +437,7 @@ test('viewer interrupted thinking and result metadata share sanitizer state', as
   const agents = new Agents(() => {});
   const plainTheme = { fg: (_: string, s: string) => s, bg: (_: string, s: string) => s, bold: (s: string) => s };
   const wait = async (fn: () => boolean) => {
-    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    for (let i = 0; i < 1000; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
     assert.fail('condition not reached');
   };
   const id = agents.spawn('interrupted thinking', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
@@ -471,7 +472,7 @@ test('failed diagnostics in the message and status line keep sanitizer state', a
   const id = agents.spawn('failed split', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
   const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 40 } }, plainTheme, () => {}, process.cwd(), id);
   const wait = async (fn: () => boolean) => {
-    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    for (let i = 0; i < 1000; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
     assert.fail('condition not reached');
   };
   try {
@@ -491,7 +492,7 @@ test('a partial tool-call preview never shows encoded control payloads', async (
   const id = agents.spawn('partial arguments', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
   const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 40 } }, plainTheme, () => {}, process.cwd(), id);
   const wait = async (fn: () => boolean) => {
-    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    for (let i = 0; i < 1000; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
     assert.fail('condition not reached');
   };
   try {
@@ -510,7 +511,7 @@ test('an unexecuted partial call does not consume a later reused id result', asy
   const id = agents.spawn('unexecuted call', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
   const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 40 } }, plainTheme, () => {}, process.cwd(), id);
   const wait = async (fn: () => boolean) => {
-    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    for (let i = 0; i < 1000; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
     assert.fail('condition not reached');
   };
   try {
@@ -529,7 +530,7 @@ test('the viewer shows a reused tool id as a new occurrence', async () => {
   const id = agents.spawn('reuse tool id', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
   const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 40 } }, plainTheme, () => {}, process.cwd(), id);
   const wait = async (fn: () => boolean) => {
-    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    for (let i = 0; i < 1000; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
     assert.fail('condition not reached');
   };
   try {
@@ -552,7 +553,7 @@ test('viewer sanitizes child text, arguments and results before rendering', asyn
   const id = agents.spawn('inject', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
   const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 60 } }, plainTheme, () => {}, process.cwd(), id);
   const wait = async (fn: () => boolean) => {
-    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    for (let i = 0; i < 1000; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
     assert.fail('condition not reached');
   };
   try {

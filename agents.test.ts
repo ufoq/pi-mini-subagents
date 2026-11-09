@@ -50,6 +50,7 @@ test('launch is immediate; late snapshot, live activity, steering and persistent
     assert.equal(agents.list()[0].status, 'finished');
     assert.match(notices[0].read, /SECRET RESULT/);
     assert.match(notices[0].read, /^j1 finished · fake-model\/fake$/m);
+    assert.match(notices[0].read, /retained: transcript in memory; subagent stop releases any live child process/);
     assert.ok(updates > 0);
     unsubscribe();
     const previousUpdates = updates;
@@ -130,6 +131,7 @@ test('stopping keeps recent output readable, including a partial answer', async 
     assert.match(partial, /^j1 stopped · fake-model\/fake$/m);
     assert.match(partial, /user: stop me/);
     assert.match(partial, /assistant \(interrupted\): authoritative text/);
+    assert.match(partial, /stopped: transcript retained in memory until parent shutdown/);
     const second = agents.spawn('finished but not settled', invocation);
     await until(() => agents.snapshot(second).status === 'running');
     await processes[1].request('finish');

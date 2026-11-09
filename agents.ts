@@ -154,9 +154,12 @@ export class Agents {
   read(id: string): string {
     const c = this.get(id);
     const header = `${id} ${c.status}${c.model ? ` · ${c.model}` : ''}`;
-    if (c.status === 'stopped') return bounded([header, c.error, c.result, transcript(c)].filter(Boolean).join('\n'));
+    if (c.status === 'stopped') {
+      return bounded([header, c.error, c.result, transcript(c), 'stopped: transcript retained in memory until parent shutdown'].filter(Boolean).join('\n'));
+    }
     if (c.status !== 'running' && c.status !== 'starting') {
-      return bounded([header, c.error, c.result].filter(Boolean).join('\n') || `${header}\n(no assistant result)`);
+      const body = [c.error, c.result].filter(Boolean).join('\n') || '(no assistant result)';
+      return bounded([header, body, 'retained: transcript in memory; subagent stop releases any live child process'].filter(Boolean).join('\n'));
     }
     return bounded([header, transcript(c)].filter(Boolean).join('\n'));
   }

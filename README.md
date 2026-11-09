@@ -54,8 +54,8 @@ subagent({ action: "spawn" | "list" | "read" | "send" | "stop",
 | Action | Required input | Effect |
 | --- | --- | --- |
 | `spawn` | `message` task brief | Returns `j1 starting on provider/model` immediately, before startup completes. Optional `model` (`"provider/model"`) overrides the child's model for this child only; omitted means the parent's model. |
-| `list` | — | Short ids, states and task labels; no transcripts. |
-| `read` | `id` | Latest result/diagnostic, or an attributed transcript (`assistant:`, `tool bash:`, `user:`) while running or after stop. Bounded to about 8,000 characters. |
+| `list` | — | Short ids, states and task labels; no transcripts. Adds a reminder that settled children retain memory and any live process until `stop`. |
+| `read` | `id` | Latest result/diagnostic, or an attributed transcript (`assistant:`, `tool bash:`, `user:`) while running or after stop. Settled reads end with a retention/stop reminder. Bounded to about 8,000 characters. |
 | `send` | `id`, `message` | Same child/context. Native steering when busy, new turn when idle. |
 | `stop` | `id` | Explicitly terminates the owned process tree; id remains inspectable. |
 
@@ -69,7 +69,7 @@ On settlement or process failure, the only automatic parent-context message is:
 
 ```text
 <system-notification>
-Subagent j1 finished. Result/diagnostic available; use subagent read when needed. The child stays alive; subagent stop releases it.
+Subagent j1 finished. Result/diagnostic available; use subagent read when needed. Settled children stay in memory; subagent stop releases any live child process.
 </system-notification>
 ```
 

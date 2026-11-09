@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { load } from './fixtures/pi-loader.ts';
 import { Agents } from './agents.ts';
 import { RpcProcess } from './rpc.ts';
-const { default: register, completionNotification, parseModel } = await load.import('../index.ts');
+const { default: register, completionNotification, parseModel, listReply } = await load.import('../index.ts');
 const { AgentViewer } = await load.import('../viewer.ts');
 const { visibleWidth, CURSOR_MARKER } = await load.import('@earendil-works/pi-tui');
 const { initTheme } = await load.import('@earendil-works/pi-coding-agent');
@@ -35,7 +35,11 @@ test('one compact tool, actionable validation, exact completion-only delivery an
   assert.equal(sent.length, 0);
   const content = completionNotification('j1', 'failed');
   assert.match(content, /^<system-notification>\nSubagent j1 failed\./);
+  assert.match(content, /subagent stop releases any live child process/);
   assert.ok(!content.includes('SECRET RESULT'));
+  assert.match(listReply([{ id: 'j1', status: 'finished', task: 'review' }]), /subagent stop releases any live child process/);
+  assert.ok(!listReply([{ id: 'j1', status: 'running', task: 'review' }]).includes('subagent stop'));
+  assert.equal(listReply([]), 'No subagents.');
   assert.equal(parseModel(undefined), undefined);
   assert.deepEqual(parseModel('anthropic/claude-sonnet-4-5'), { provider: 'anthropic', id: 'claude-sonnet-4-5' });
   // Model ids themselves may contain slashes.

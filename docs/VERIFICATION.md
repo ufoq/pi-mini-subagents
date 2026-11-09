@@ -357,8 +357,10 @@ reached the parent. The offline suite asserts that:
 - stopping mid-turn keeps the partial assistant text and recent tools readable;
 - the header shows the resolved model reported by `get_state`
   (`j1 finished · fake-model/fake`);
-- the completion notice still contains no result body, and now says the child
-  stays alive until `subagent stop`.
+- the completion notice still contains no result body, and says settled children
+  retain memory until `subagent stop`;
+- `list` adds that reminder only while a settled child remains, and `read` ends a
+  settled/stopped result with the matching retention note.
 
 `spawn` now echoes the requested `provider/model` in its immediate reply, so a
 wrong model is visible before the child starts; `read` shows the resolved model

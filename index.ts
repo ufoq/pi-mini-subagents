@@ -4,7 +4,15 @@ import { Type } from 'typebox';
 import { Agents, childInvocation, type Status } from './agents.ts';
 
 export function completionNotification(id: string, status: Status) {
-  return `<system-notification>\nSubagent ${id} ${status}. Result/diagnostic available; use subagent read when needed. The child stays alive; subagent stop releases it.\n</system-notification>`;
+  return `<system-notification>\nSubagent ${id} ${status}. Result/diagnostic available; use subagent read when needed. Settled children stay in memory; subagent stop releases any live child process.\n</system-notification>`;
+}
+
+export function listReply(rows: { id: string; status: Status; task: string }[]) {
+  const lines = rows.map(c => `${c.id} ${c.status}: ${c.task}`);
+  if (rows.some(c => c.status === 'finished' || c.status === 'failed')) {
+    lines.push('Settled children retain memory; subagent stop releases any live child process.');
+  }
+  return lines.join('\n') || 'No subagents.';
 }
 
 /** "provider/model" (model ids may contain slashes); undefined keeps the parent model. */
@@ -48,7 +56,7 @@ export default function (pi: ExtensionAPI) {
         const id = a.spawn(params.message ?? '', childInvocation(ctx.cwd, model, ctx.thinkingLevel));
         text = `${id} starting on ${model.provider}/${model.id}. Parent may continue; completion will notify. Results require read.`;
       } else if (params.action === 'list') {
-        text = a.list().map(c => `${c.id} ${c.status}: ${c.task}`).join('\n') || 'No subagents.';
+        text = listReply(a.list());
       } else {
         if (!params.id) throw new Error(`id is required for ${params.action}.`);
         switch (params.action) {

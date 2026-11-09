@@ -27,8 +27,9 @@ conversation/tools, steer it, read its result on demand, and explicitly stop it.
 - Do not modify a shared blueprint or operator-provided instructions.
 - Load the prototype explicitly in dedicated test Pi sessions. Do not hot-install
   it into the coding agent's own runtime or share it across active workers.
-- Keep runtime coordination in memory. Ordinary Pi transcripts are allowed;
-  no custom job directories, result files, mailboxes or recovery daemon.
+- Keep runtime coordination in memory. A parent may keep its ordinary Pi
+  transcript; children are ephemeral (`--no-session`) and leave no session behind.
+  No custom job directories, result files, mailboxes or recovery daemon.
 
 The implementation worker must be able to work from this checkout alone. No
 host scratch checkouts, external scripts or a Docker socket are required for its
@@ -59,8 +60,9 @@ plus the inherited skill catalog. Disable extensions, which also excludes MCP
 cannot delegate. Parent prompts describe read-only intent, allowed files and task
 ownership; those instructions are not a sandbox. Do not load our launcher in a
 child.
-Keep normal project-instruction discovery and Pi transcript storage. This is a
-small fixed launch configuration, not a role/permission/inheritance framework.
+Keep normal project-instruction discovery. Start children with `--no-session` so
+they never clutter `/resume` and persist no transcript. This is a small fixed
+launch configuration, not a role/permission/inheritance framework.
 
 ### Minimal code layout
 

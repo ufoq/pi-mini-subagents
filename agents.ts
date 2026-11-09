@@ -17,8 +17,9 @@ type ProcessFactory = (spec: Invocation, event: (e: RecordData) => void, failure
 export function childInvocation(cwd: string, model?: { provider: string; id: string }, thinking?: string): Invocation {
   const shell = process.platform === 'win32' ? 'powershell' : 'bash';
   // All built-in tools plus inherited skills, templates and themes. Extensions
-  // stay off, so MCP and our own `subagent` tool never load in a child.
-  const args = ['--mode', 'rpc', '--no-extensions', '--tools', `read,${shell},edit,write,grep,find,ls`];
+  // stay off, so MCP and our own `subagent` tool never load in a child. Children
+  // write no transcript, so they never appear in Pi's /resume list.
+  const args = ['--mode', 'rpc', '--no-session', '--no-extensions', '--tools', `read,${shell},edit,write,grep,find,ls`];
   if (model) args.push('--provider', model.provider, '--model', model.id);
   if (thinking) args.push('--thinking', thinking);
   // Use the same CLI as the parent when running a standard Node installation.

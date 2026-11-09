@@ -117,15 +117,18 @@ controls are separate from the TUI for a later explicit adapter.
   `edit`, `write`, `grep`, `find`, `ls`) and skills such as `web-search` are
   available. Extensions stay off, and because Pi implements MCP as a built-in
   extension, MCP is not available in children either. That also means no
-  `subagent` tool, so a child cannot delegate. Project instruction discovery and
-  normal Pi transcript storage remain enabled. RPC children cannot answer Pi's
-  project-trust prompt, so trust-gated project skills load only when a saved
-  decision or `defaultProjectTrust` allows them; user-level skills always load.
+  `subagent` tool, so a child cannot delegate. Project instruction discovery stays
+  enabled. Children run with `--no-session`, so their conversations never appear
+  in Pi's `/resume` picker and write no transcript; inspect them live in
+  `/agents` or with `subagent read`. RPC children cannot answer Pi's project-trust
+  prompt, so trust-gated project skills load only when a saved decision or
+  `defaultProjectTrust` allows them; user-level skills always load.
 - **Prompt restrictions are not a sandbox.** State read-only intent, allowed
   files/actions and ownership in the task brief. Children can mutate the shared
   workspace and use the parent's configured credentials/network access.
-- Registry, results and live state are memory-only. Child transcripts use normal
-  Pi session storage. No result directories, mailboxes, recovery or resume API.
+- Registry, results and live state are memory-only. Children are ephemeral
+  (`--no-session`), so nothing is written to Pi's session storage. No result
+  directories, mailboxes, recovery or resume API.
 - Explicit stop and normal `session_shutdown` (including session replacement/
   reload) clean up owned processes. Linux cleanup snapshots the live descendant
   tree as well as process groups, since Pi bash tools create detached groups.
@@ -155,7 +158,7 @@ MINI_SUBAGENTS_LIVE_MODEL=provider/model node scripts/probe-live.ts
 ```
 
 It explicitly loads this extension in a separate native-RPC parent, disables
-other resources, puts child transcripts under `tmp/`, and checks tool results,
+other resources, keeps scratch files under `tmp/`, and checks tool results,
 notifications, idle wakeup, retained context and stop. Optional
 `MINI_SUBAGENTS_PI_CLI=/absolute/path/to/pi-coding-agent/dist/cli.js` pins the
 host and verifies the observed child invocation;

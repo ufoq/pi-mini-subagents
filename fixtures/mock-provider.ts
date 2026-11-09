@@ -7,6 +7,7 @@ export async function mockProvider() {
   const requests: any[] = [];
   const childPending: Array<() => void> = [];
   const busyPending: Array<() => void> = [];
+  const childFinals: number[] = [];
   let serial = 0;
   function answer(res: ServerResponse, text?: string, tool?: { name: string; args: any }) {
     const id = `mock-${++serial}`;
@@ -32,7 +33,7 @@ export async function mockProvider() {
     if (!parent) {
       const work = () => {
         if (!messages.some((m: any) => m.role === 'tool')) answer(res, undefined, { name: 'bash', args: { command: 'printf TOOL_STARTED; sleep 2; printf TOOL_DONE' } });
-        else answer(res, `CHILD_SECRET_RESULT cobalt. Inputs: ${users.join(' | ')}`);
+        else { childFinals.push(Date.now()); answer(res, `CHILD_SECRET_RESULT cobalt. Inputs: ${users.join(' | ')}`); }
       };
       // Hold every child request until explicitly released by the probe.
       childPending.push(work);
@@ -50,7 +51,7 @@ export async function mockProvider() {
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('No test server address');
   return {
-    requests, childPending, busyPending,
+    requests, childPending, busyPending, childFinals,
     url: `http://127.0.0.1:${address.port}/v1`,
     releaseChild: () => { const next = childPending.shift(); if (!next) throw new Error('No child request to release'); next(); },
     releaseBusy: () => busyPending.shift()?.(),

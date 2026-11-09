@@ -26,7 +26,7 @@ or a shared blueprint.
 | Observation | Child list, existing messages/tool activity, then live events. Agent and human controls use the same registry. Human viewing adds nothing to parent model context. |
 | Completion | Send only a concise `<system-notification>` that the child finished and its result is available. Include the child id, not the result body. It reminds a busy parent and wakes an idle one through Pi's normal delivery. Parent retrieves results when needed. |
 | Stop | Direct child stop/termination control, independent of the parent's Escape behavior. |
-| History | Ordinary Pi transcripts allowed; no separate orchestration persistence or recovery. |
+| History | A parent keeps its ordinary Pi transcript; children are ephemeral (`--no-session`) and leave nothing on disk. No separate orchestration persistence or recovery. |
 | Cleanup | Basic child-process cleanup when the extension shuts down. No elaborate session/branch handoff machinery. |
 
 The notification tag is text inside an ordinary Pi notification/custom message,

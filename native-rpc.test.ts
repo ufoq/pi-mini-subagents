@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { RpcProcess } from './rpc.ts';
 import { mockProvider, isolatedEnvironment } from './fixtures/mock-provider.ts';
@@ -21,18 +21,11 @@ function alive(pid: number) {
     return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0] !== 'Z';
   } catch { return false; }
 }
-/** True once any child transcript persisted the given text, so no fixed sleep is needed. */
-function childWrote(root: string, needle: string) {
-  const dir = resolve(root, 'sessions');
-  try {
-    for (const file of readdirSync(dir, { recursive: true }) as string[]) {
-      if (file.endsWith('.jsonl') && readFileSync(resolve(dir, file), 'utf8').includes(needle)) return true;
-    }
-  } catch { /* session dir not created yet */ }
-  return false;
-}
 async function until(fn: () => boolean, label: string) {
-  for (let i = 0; i < 1000; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+  for (let i = 0; i < 1000; i++) {
+    if (fn()) return;
+    await new Promise(r => setTimeout(r, 10));
+  }
   assert.fail(`Timed out: ${label}`);
 }
 
@@ -80,16 +73,18 @@ test('native RPC parent: immediate launch, idle wake, explicit read, busy follow
     const beforeBusy = settled();
     await prompt('BUSY');
     await until(() => mock.busyPending.length === 1, 'parent busy');
+    const finalsBefore = mock.childFinals.length;
     mock.releaseChild();
-    // Hold the parent provider response across a real child completion instead of
-    // sleeping: the child's own transcript is the completion evidence.
-    await until(() => childWrote(root, 'follow-up recall color'), 'child finished while parent busy');
+    // Wait for the child's final answer, then give its process a short grace to
+    // settle. Children keep no transcript, so there is nothing else to observe.
+    await until(() => mock.childFinals.length > finalsBefore, 'child answered follow-up');
+    await new Promise(r => setTimeout(r, 400));
     assert.equal((await rpc.request('get_state')).isStreaming, true, 'parent still busy');
     assert.equal(notifications().length, 1, 'custom follow-up not inserted mid-response');
     assert.equal(settled(), beforeBusy, 'busy parent not interrupted');
     mock.releaseBusy();
     await until(() => settled() > beforeBusy, 'busy follow-up delivered');
-    assert.equal(notifications().length, 2);
+    await until(() => notifications().length === 2, 'queued completion notice delivered');
     const childRequests = mock.requests.filter(r => !r.tools?.some((t: any) => t.function?.name === 'subagent'));
     const followup = childRequests.at(-1);
     assert.match(JSON.stringify(followup.messages), /MOCK_CHILD remember cobalt/);

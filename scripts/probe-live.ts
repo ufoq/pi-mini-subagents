@@ -38,8 +38,9 @@ const prompt = (message: string) => rpc.request('prompt', { message, streamingBe
 try {
   const state = await rpc.request('get_state');
   assert.equal(`${state.model.provider}/${state.model.id}`, model);
-  console.log(`Real-model smoke: ${model}; Pi ${version}; uid=${process.getuid?.()}; session logs under ${root}`);
-  await prompt(`This is a tiny extension smoke test, not a coding task. Use ONLY the subagent tool. First spawn exactly one child with this exact task brief: "Do not read or change files, delegate, or use network. Remember the word ${token}. Use bash exactly once with command: printf CHILD_TOOL_OK; sleep 2; printf CHILD_TOOL_DONE . Then reply CHILD_READY. Preserve your conversation for later follow-up." After spawn, reply PARENT_CONTINUES. Do not list/read/send/stop yet. For any later system-notification, reply NOTICE_SEEN only; never automatically retrieve a child result. Wait for an explicit human request to read or follow up.`);
+  const marker = resolve(root, 'child-bash-marker');
+  console.log(`Real-model smoke: ${model}; Pi ${version}; uid=${process.getuid?.()}; scratch under ${root}`);
+  await prompt(`This is a tiny extension smoke test, not a coding task. Use ONLY the subagent tool. First spawn exactly one child with this exact task brief: "Do not read or change files, delegate, or use network. Remember the word ${token}. Use bash exactly once with command: printf CHILD_TOOL_OK; sleep 2; printf CHILD_TOOL_DONE > ${marker} . Then reply CHILD_READY. Preserve your conversation for later follow-up." After spawn, reply PARENT_CONTINUES. Do not list/read/send/stop yet. For any later system-notification, reply NOTICE_SEEN only; never automatically retrieve a child result. Wait for an explicit human request to read or follow up.`);
   await until(() => toolResults().some(e => JSON.stringify(e.result).includes('j1 starting')), 'spawn accepted');
   const children = execFileSync('ps', ['-o', 'pid=,args=', '--ppid', String(rpc.pid)], { encoding: 'utf8' }).trim();
   if (cli) assert.ok(children.includes(resolve(cli)), 'child uses pinned Pi CLI');
@@ -66,17 +67,13 @@ try {
   await until(() => toolResults().slice(beforeStop).some(e => JSON.stringify(e.result).includes('j1 stopped')), 'explicit stop');
   await until(() => settled() > beforeStopSettled, 'parent settled after stop');
   await rpc.closeInput();
-  const files = (await readdir(resolve(root, 'sessions'), { recursive: true })).filter(f => f.endsWith('.jsonl'));
-  assert.equal(files.length, 1, 'one persistent child transcript');
-  const entries = (await readFile(resolve(root, 'sessions', files[0]), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
-  const childMessages = entries.filter(e => e.type === 'message').map(e => e.message);
-  assert.ok(childMessages.some(m => m.role === 'toolResult' && m.toolName === 'bash' && !m.isError && JSON.stringify(m.content).includes('CHILD_TOOL_OKCHILD_TOOL_DONE')), 'actual child bash result');
-  assert.ok(JSON.stringify(childMessages.findLast(m => m.role === 'assistant')?.content).includes(token), 'actual retained child answer');
-  const childTokens = childMessages.filter(m => m.role === 'assistant').reduce((sum, m) => sum + (m.usage?.totalTokens ?? 0), 0);
+  const files = (await readdir(resolve(root, 'sessions'), { recursive: true }).catch(() => [])).filter(f => String(f).endsWith('.jsonl'));
+  assert.equal(files.length, 0, 'children keep no resume-visible session');
+  assert.match(await readFile(marker, 'utf8'), /CHILD_TOOL_OKCHILD_TOOL_DONE/, 'actual child bash result');
   const assistants = events.filter(e => e.type === 'message_end' && e.message?.role === 'assistant').map(e => e.message);
   const tokens = assistants.reduce((sum, m) => sum + (m.usage?.totalTokens ?? 0), 0);
-  console.log(`PASS real-model: spawn, actual bash result, completion-only notice/idle wake, explicit read, context-preserving follow-up, stop. Parent/child assistant tokens (includes cache): ${tokens}/${childTokens}.`);
-  await writeFile(`${root}/summary.json`, JSON.stringify({ model, version, uid: process.getuid?.(), cli: cli ?? 'pi on PATH', extension, children, token, parentAssistantMessages: assistants.length, parentTokensIncludingCache: tokens, childTokensIncludingCache: childTokens, notifications: notifications().map(e => e.message.content) }, null, 2));
+  console.log(`PASS real-model: spawn, actual bash result, completion-only notice/idle wake, explicit read, context-preserving follow-up, stop. Parent assistant tokens (including cache): ${tokens}.`);
+  await writeFile(`${root}/summary.json`, JSON.stringify({ model, version, uid: process.getuid?.(), cli: cli ?? 'pi on PATH', extension, children, token, parentAssistantMessages: assistants.length, parentTokensIncludingCache: tokens, notifications: notifications().map(e => e.message.content) }, null, 2));
 } finally {
   await rpc.stop();
   await writeFile(`${root}/events.json`, JSON.stringify(events, null, 2));

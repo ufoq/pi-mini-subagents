@@ -269,6 +269,7 @@ test('child CLI inherits parent resources except extensions, with all tools', ()
   const spec = childInvocation('/tmp', { provider: 'provider', id: 'model' }, 'high');
   assert.ok(spec.args.includes('--mode'));
   assert.ok(spec.args.includes('--no-extensions'), 'extensions stay off, so no subagent tool');
+  assert.ok(spec.args.includes('--no-session'), 'children do not clutter /resume or persist transcripts');
   for (const flag of ['--no-mcp', '--no-skills', '--no-prompt-templates', '--no-themes']) {
     assert.ok(!spec.args.includes(flag), `${flag} would strip a parent resource`);
   }
@@ -277,5 +278,5 @@ test('child CLI inherits parent resources except extensions, with all tools', ()
   assert.ok(!spec.args.some(a => a.startsWith('builtin:')), 'no built-in extensions either, so no MCP');
   assert.ok(!spec.args.includes('./index.ts'), 'our extension never loads in a child');
   assert.ok(spec.args.includes('provider')); assert.ok(spec.args.includes('model')); assert.ok(spec.args.includes('high'));
-  for (const flag of ['--continue', '--fork', '--no-context-files', '--no-session']) assert.ok(!spec.args.includes(flag));
+  for (const flag of ['--continue', '--fork', '--no-context-files', '--resume']) assert.ok(!spec.args.includes(flag));
 });

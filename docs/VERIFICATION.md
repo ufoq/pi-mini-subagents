@@ -9,14 +9,16 @@ claim of exhaustive production readiness.
 - `./scripts/test rpc.test.ts`
 - `./scripts/test extension.test.ts`
 - `./scripts/test native-rpc.test.ts`
-- `./scripts/test` — **13 passing tests**, deterministic offline suite (includes real Pi processes
+- `./scripts/test` — **29 passing tests**, deterministic offline suite (includes real Pi processes
   against a loopback mock SSE endpoint; no external provider).
 - `node scripts/probe-tui.ts` — actual native TUI in a separate PTY with mock
   provider; successful logs in ignored `tmp/native-probe-UrcNNR/` and a later
   full reruns in `tmp/native-probe-PYPfnf/` and `tmp/native-probe-bdPVqw/`.
 - `MINI_SUBAGENTS_LIVE_MODEL=<provider>/<model> node scripts/probe-live.ts`
   — one successful small real-provider run. Private synthetic evidence in
-  `tmp/live-probe-ObADCh/`; ordinary child transcript in its `sessions/`.
+  `tmp/live-probe-ObADCh/`. That run predates ephemeral children, so its child
+  transcript is historical evidence; current runs assert a bash marker file and
+  that no child session was written.
 - `npm pack --dry-run --json` — no publication and no global installation.
 - `git diff --check`.
 
@@ -97,9 +99,9 @@ word response), all on the intended provider/model. Reported tokens including
 cache: parent 14,426, child 9,797. Explicit stop returned `j1 stopped`.
 
 This was not a real-provider native-TUI probe, a provider reliability survey, or
-a large-workload benchmark. The live script now also asserts the child transcript
-and actual bash result automatically; those checks were independently performed
-against the saved run above when added.
+a large-workload benchmark. The live script now asserts the actual bash result via a
+marker file the child writes, since children no longer keep a transcript; those
+checks were independently performed against the saved run above when added.
 
 ### Separate Unix user + DeepSeek real-provider run
 
@@ -134,7 +136,7 @@ and provider readiness before the extension flow. Final successful run:
 - Actual successful child bash tool result `CHILD_TOOL_OKCHILD_TOOL_DONE`.
 - Parent settled before completion; only result-free notices were delivered.
 - Explicit initial/result reads, a remembered random word on follow-up in the
-  one persistent child transcript, explicit stop, then parent settlement/EOF.
+  same child conversation, explicit stop, then parent settlement/EOF.
 - Reported parent/child tokens including cache: **16,102 / 5,056**. Including the
   READY check: **21,609 total**, **474 output**, **16,816 cached input**. No dollar
   cost was inferred from potentially zero-priced local metadata.
@@ -269,10 +271,20 @@ Covered by:
   `-e builtin:mcp` would add it (verified for both `direct` and default `codemode`
   exposure), but that also means carrying extension machinery and the
   `codemode`/`tool_search` tools, so the simpler `--no-extensions` configuration
-  was kept. The
-  busy-parent probe now waits for the child's own persisted transcript instead of a
-  fixed sleep, and the status line shrinks its intent so a 20-column overlay still
-  shows a failed child's diagnostic.
+  was kept. The busy-parent probe now waits for the child's final provider answer
+  instead of a fixed sleep, and the status line shrinks its intent so a 20-column
+  overlay still shows a failed child's diagnostic.
+
+### Ephemeral children (later change)
+
+Children now start with `--no-session`, so they no longer appear in Pi's
+`/resume` picker. Verified in the offline suite with a real Pi RPC child:
+`get_state` still returns an ephemeral session id, prompts and tool calls work,
+and the session directory receives **zero** `.jsonl` files. The consequence is
+that a stopped or finished child leaves no on-disk transcript; inspect it through
+`/agents` while the child exists or with `subagent read`. Earlier real-model
+evidence above relied on persisted transcripts and was produced before this
+change.
 
 This is an optional per-spawn argument, not a role/agent-definition registry; the
 rest of the launch configuration stays fixed.

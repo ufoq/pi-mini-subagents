@@ -11,7 +11,7 @@ export interface Snapshot {
   messages: RecordData[]; streaming?: RecordData; interrupted?: string; interruptedMessage?: RecordData;
   tools: Record<string, ToolActivity>; result?: string; error?: string;
 }
-interface Child extends Snapshot { rpc: RpcProcess; ready: Promise<void>; held?: boolean; dirty?: boolean; pending?: Status[] }
+interface Child extends Snapshot { rpc: RpcProcess; ready: Promise<void>; held?: boolean; dirty?: boolean; pending?: Status[]; sequence?: number; pendingStart?: boolean }
 type ProcessFactory = (spec: Invocation, event: (e: RecordData) => void, failure: (e: Error) => void) => RpcProcess;
 
 export function childInvocation(cwd: string, model?: { provider: string; id: string }, thinking?: string): Invocation {
@@ -287,7 +287,7 @@ export class Agents {
   }
 
   snapshot(id: string): Snapshot {
-    const { rpc: _rpc, ready: _ready, ...snapshot } = this.get(id);
+    const { rpc: _rpc, ready: _ready, held: _held, dirty: _dirty, pending: _pending, sequence: _sequence, pendingStart: _pendingStart, ...snapshot } = this.get(id);
     return structuredClone(snapshot);
   }
 
@@ -321,18 +321,18 @@ export class Agents {
     const c = this.get(id);
     await c.ready;
     if (c.status === 'stopped') throw new Error(`Subagent ${id} is stopped; spawn a new child.`);
-    const previous = { status: c.status, error: c.error, result: c.result, interrupted: c.interrupted, interruptedMessage: c.interruptedMessage };
-    // Do not surface the previous answer while a new turn is being submitted.
-    c.error = undefined; c.result = undefined; c.interrupted = undefined; c.interruptedMessage = undefined;
+    const idle = c.status !== 'running';
+    const sequence = c.sequence ?? 0;
     try {
       const accepted = await c.rpc.request('prompt', { message, streamingBehavior: 'steer' });
       if (accepted.disposition === 'handled') throw new Error('Child prompt was handled without starting work.');
-      c.status = 'running';
-      this.changed(id);
+      // Lifecycle events are authoritative. If none arrived yet, remember that
+      // this idle child still owes a start so a transport failure can discard
+      // the previous answer instead of presenting it as the new failure.
+      if (idle && (c.sequence ?? 0) === sequence) c.pendingStart = true;
     } catch (error) {
-      // A rejected input is not proof that the already-running child failed.
-      // Transport failures report themselves through onFailure instead.
-      if (c.status === previous.status) { Object.assign(c, previous); this.changed(id); }
+      // A rejected input is not proof that the child failed; leave retained
+      // state alone and report the rejection to the caller.
       throw new Error(sanitize(error instanceof Error ? error.message : String(error)));
     }
   }
@@ -378,6 +378,7 @@ export class Agents {
   private failed(c: Child, error: unknown) {
     if (c.status === 'stopped' || c.status === 'failed') return;
     if (c.streaming) { c.interrupted = messageText(c.streaming); c.interruptedMessage = c.streaming; }
+    if (c.pendingStart) { c.result = undefined; c.interrupted = undefined; c.interruptedMessage = undefined; c.pendingStart = false; }
     c.status = 'failed'; c.error = String(error instanceof Error ? error.message : error); c.streaming = undefined;
     interruptTools(c, 'Child process/command failed before tool completed.');
     this.changed(c.id);
@@ -403,8 +404,10 @@ export class Agents {
     if (c.status === 'stopped') return;
     switch (e.type) {
       case 'agent_start':
+        c.sequence = (c.sequence ?? 0) + 1; c.pendingStart = false;
         c.status = 'running'; c.error = undefined; c.result = undefined;
         c.interrupted = undefined; c.interruptedMessage = undefined;
+        this.changed(c.id);
         break;
       case 'message_start':
         if (e.message.role === 'assistant') c.streaming = e.message;
@@ -429,6 +432,7 @@ export class Agents {
         break;
       }
       case 'agent_settled': {
+        c.sequence = (c.sequence ?? 0) + 1; c.pendingStart = false;
         const last = c.messages.findLast(m => m.role === 'assistant');
         c.result = messageText(last) || '(no assistant text)';
         c.error = last?.errorMessage ?? (e.aborted ? 'Child run aborted.' : last?.stopReason === 'error' ? 'Child provider failed.' : undefined);

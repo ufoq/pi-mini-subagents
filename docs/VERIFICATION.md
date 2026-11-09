@@ -13,7 +13,7 @@ name that was actually installed and tested at the time.
 - `./scripts/test rpc.test.ts`
 - `./scripts/test extension.test.ts`
 - `./scripts/test native-rpc.test.ts`
-- `./scripts/test` — **59 passing tests**, deterministic offline suite (includes real Pi processes
+- `./scripts/test` — **61 passing tests**, deterministic offline suite (includes real Pi processes
   against a loopback mock SSE endpoint; no external provider).
 - `node scripts/probe-tui.ts` — actual native TUI in a separate PTY with mock
   provider; successful logs in ignored `tmp/native-probe-UrcNNR/` and a later
@@ -398,6 +398,8 @@ reached the parent. The offline suite asserts that:
 - failed reads retain a settled result longer than the 500-character preview and a
   long interrupted answer beyond the preview clip;
 - a send whose child dies before `agent_start` does not expose the previous result;
+- a settlement that arrives before the prompt acknowledgement is not overwritten,
+  and overlapping rejected sends keep the retained result;
 - the package declares the MIT license and ships a matching `LICENSE` file;
 - child RPC errors are sanitized before they reach the parent tool renderer;
 - tool arguments are sanitized before JSON encoding, including image `mimeType` and

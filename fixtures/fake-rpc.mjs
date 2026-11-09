@@ -35,6 +35,16 @@ process.stdin.on('data', chunk => {
           setTimeout(() => process.exit(7), 10);
           break;
         }
+        if (c.message === 'fastsettle') {
+          const done = assistant('FAST_DONE');
+          process.stdout.write([
+            { type: 'response', id: c.id, command: c.type, success: true, data: { disposition: 'started' } },
+            { type: 'agent_start' },
+            { type: 'message_end', message: done },
+            { type: 'agent_settled', aborted: false },
+          ].map(value => JSON.stringify(value)).join('\n') + '\n');
+          break;
+        }
         if (c.message === 'crashbeforestart') {
           reply({ disposition: 'started' });
           setTimeout(() => process.exit(7), 20);

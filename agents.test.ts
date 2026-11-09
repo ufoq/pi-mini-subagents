@@ -245,6 +245,34 @@ test('a send that dies before starting does not expose the previous result', asy
   } finally { await agents.shutdown(); }
 });
 
+test('a fast settlement is not overwritten by the prompt acknowledgement', async () => {
+  const { agents, processes } = setup();
+  try {
+    const id = agents.spawn('fast settlement', invocation);
+    await until(() => agents.status(id) === 'running');
+    await processes[0].request('finish');
+    await processes[0].request('settle');
+    await until(() => agents.status(id) === 'finished');
+    await agents.send(id, 'fastsettle');
+    assert.equal(agents.status(id), 'finished', 'the settlement arrived before send resumed');
+    assert.match(agents.read(id), /FAST_DONE/);
+  } finally { await agents.shutdown(); }
+});
+
+test('overlapping rejected sends keep the retained answer', async () => {
+  const { agents, processes } = setup();
+  try {
+    const id = agents.spawn('retained answer', invocation);
+    await until(() => agents.status(id) === 'running');
+    await processes[0].request('result');
+    await until(() => agents.status(id) === 'finished');
+    const results = await Promise.allSettled([agents.send(id, 'reject'), agents.send(id, 'reject')]);
+    assert.ok(results.every(result => result.status === 'rejected'), 'both sends are rejected');
+    assert.equal(agents.status(id), 'finished');
+    assert.match(agents.read(id), /CLEAN/, 'a rejected send does not erase the retained result');
+  } finally { await agents.shutdown(); }
+});
+
 test('failed reads retain a result longer than the transcript preview', async () => {
   const { agents, processes } = setup();
   try {

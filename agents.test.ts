@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Agents, childInvocation } from './agents.ts';
+import { Agents, childInvocation, transcript } from './agents.ts';
 import { RpcProcess } from './rpc.ts';
 const invocation = { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() };
 async function until(predicate: () => boolean) {
@@ -95,6 +95,7 @@ test('provider failure, process failure, validation and result read bounds', asy
     await processes[0].request('finish'); await processes[0].request('settle');
     assert.ok(agents.read(id).length < 9000);
     assert.match(agents.read(id), /truncated/);
+    assert.match(agents.read(id), /retained: transcript in memory; subagent stop releases any live child process/, 'the retention reminder survives truncation');
     await agents.stop(id);
     await assert.rejects(agents.send(id, 'follow up'), /stopped/);
     const crashed = agents.spawn('crash', invocation);
@@ -119,6 +120,14 @@ test('streaming deltas are reconstructed, then replaced by authoritative message
   } finally { await agents.shutdown(); }
 });
 
+test('transcript preserves code spacing and strips terminal escapes', () => {
+  const snapshot: any = {
+    messages: [{ role: 'assistant', content: [{ type: 'text', text: 'go("a  b")\n  indented \x1b[31mX\x1b[0m' }] }],
+    tools: {},
+  };
+  assert.match(transcript(snapshot), /go\("a  b"\)\n  indented X/);
+});
+
 test('stopping keeps recent output readable, including a partial answer', async () => {
   const { agents, processes, notices } = setup();
   try {
@@ -131,7 +140,11 @@ test('stopping keeps recent output readable, including a partial answer', async 
     assert.match(partial, /^j1 stopped · fake-model\/fake$/m);
     assert.match(partial, /user: stop me/);
     assert.match(partial, /assistant \(interrupted\): authoritative text/);
+    assert.match(partial, /tool bash \(interrupted\): .*live output/s);
+    assert.match(partial, /\[Stopped before tool completed\.\]/);
     assert.match(partial, /stopped: transcript retained in memory until parent shutdown/);
+    await agents.stop(id);
+    assert.match(agents.read(id), /assistant \(interrupted\): authoritative text/, 'repeated stop keeps the partial answer');
     const second = agents.spawn('finished but not settled', invocation);
     await until(() => agents.snapshot(second).status === 'running');
     await processes[1].request('finish');

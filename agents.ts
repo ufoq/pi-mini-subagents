@@ -4,7 +4,7 @@ import { RpcProcess, type Invocation, type RecordData } from './rpc.ts';
 
 export type Status = 'starting' | 'running' | 'finished' | 'failed' | 'stopped';
 export interface ToolActivity {
-  id: string; name: string; args: RecordData; result?: RecordData; running: boolean; isError?: boolean;
+  id: string; name: string; args: RecordData; result?: RecordData; running: boolean; isError?: boolean; interrupted?: boolean;
 }
 export interface Snapshot {
   id: string; task: string; status: Status; sessionId?: string; model?: string;
@@ -47,10 +47,24 @@ export function plain(text: string): string {
 export function label(text: string): string {
   return [...plain(text)].slice(0, 100).join('');
 }
-const bounded = (text: string) => text.length <= 8000 ? text : text.slice(0, 8000) + '\n[truncated; full conversation in /agents]';
+const LIMIT = 8000;
+/** Keep the trailing reminder even when the body is truncated. */
+function bounded(text: string, tail?: string) {
+  const suffix = tail ? `\n${tail}` : '';
+  if (text.length + suffix.length <= LIMIT) return text + suffix;
+  const note = '\n[truncated; full conversation in /agents]';
+  return text.slice(0, Math.max(0, LIMIT - suffix.length - note.length)) + note + suffix;
+}
+/** Strip terminal escapes/control characters but preserve code spacing and newlines. */
+function sanitize(text: string): string {
+  return text
+    .replace(/\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07/g, '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, ' ');
+}
 const clip = (text: string, limit = 500) => {
-  const line = plain(text);
-  return [...line].length <= limit ? line : [...line].slice(0, limit).join('') + '…';
+  const value = sanitize(text);
+  return [...value].length <= limit ? value : [...value].slice(0, limit).join('') + '…';
 };
 /** One attributed line per message/tool call, so `read` does not dump an unlabelled wall. */
 export function transcript(c: Snapshot): string {
@@ -72,6 +86,7 @@ export function transcript(c: Snapshot): string {
   if (c.interrupted) lines.push(`assistant (interrupted): ${clip(c.interrupted)}`);
   for (const tool of Object.values(c.tools)) {
     if (tool.running) lines.push(`tool ${tool.name} (running): ${clip(JSON.stringify(tool.args))}${tool.result ? ` → ${clip(messageText(tool.result))}` : ''}`);
+    else if (tool.interrupted) lines.push(`tool ${tool.name} (interrupted): ${clip(JSON.stringify(tool.args))}${tool.result ? ` → ${clip(messageText(tool.result))}` : ''}`);
   }
   return lines.filter(Boolean).join('\n');
 }
@@ -155,11 +170,12 @@ export class Agents {
     const c = this.get(id);
     const header = `${id} ${c.status}${c.model ? ` · ${c.model}` : ''}`;
     if (c.status === 'stopped') {
-      return bounded([header, c.error, c.result, transcript(c), 'stopped: transcript retained in memory until parent shutdown'].filter(Boolean).join('\n'));
+      const body = [header, c.error, c.result, transcript(c)].filter(Boolean).join('\n');
+      return bounded(body, 'stopped: transcript retained in memory until parent shutdown');
     }
     if (c.status !== 'running' && c.status !== 'starting') {
-      const body = [c.error, c.result].filter(Boolean).join('\n') || '(no assistant result)';
-      return bounded([header, body, 'retained: transcript in memory; subagent stop releases any live child process'].filter(Boolean).join('\n'));
+      const body = [header, c.error, c.result].filter(Boolean).join('\n') || `${header}\n(no assistant result)`;
+      return bounded(body, 'retained: transcript in memory; subagent stop releases any live child process');
     }
     return bounded([header, transcript(c)].filter(Boolean).join('\n'));
   }
@@ -187,7 +203,7 @@ export class Agents {
     const c = this.get(id);
     c.status = 'stopped';
     // Keep what the child had produced so stop-then-read is still useful.
-    c.interrupted = c.streaming ? messageText(c.streaming) : undefined;
+    if (c.streaming) c.interrupted = messageText(c.streaming);
     c.streaming = undefined;
     interruptTools(c, 'Stopped before tool completed.');
     this.changed(id);
@@ -282,7 +298,7 @@ export class Agents {
 function interruptTools(c: Snapshot, reason: string) {
   for (const tool of Object.values(c.tools)) {
     if (!tool.running) continue;
-    tool.running = false; tool.isError = true;
+    tool.running = false; tool.isError = true; tool.interrupted = true;
     tool.result = { ...tool.result, isError: true, content: [...(tool.result?.content ?? []), { type: 'text', text: `[${reason}]` }] };
   }
 }

@@ -53,8 +53,8 @@ export default function (pi: ExtensionAPI) {
       let text: string;
       if (params.action === 'spawn') {
         const model = parseModel(params.model) ?? ctx.model;
-        const id = a.spawn(params.message ?? '', childInvocation(ctx.cwd, model, ctx.thinkingLevel));
-        text = `${id} starting on ${model.provider}/${model.id}. Parent may continue; completion will notify. Results require read.`;
+        const id = a.spawn(params.message ?? '', childInvocation(ctx.cwd, model ?? undefined, ctx.thinkingLevel));
+        text = `${id} starting${model ? ` on ${model.provider}/${model.id}` : ''}. Parent may continue; completion will notify. Results require read.`;
       } else if (params.action === 'list') {
         text = listReply(a.list());
       } else {

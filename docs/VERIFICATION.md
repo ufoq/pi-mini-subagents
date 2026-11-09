@@ -13,7 +13,7 @@ name that was actually installed and tested at the time.
 - `./scripts/test rpc.test.ts`
 - `./scripts/test extension.test.ts`
 - `./scripts/test native-rpc.test.ts`
-- `./scripts/test` — **30 passing tests**, deterministic offline suite (includes real Pi processes
+- `./scripts/test` — **31 passing tests**, deterministic offline suite (includes real Pi processes
   against a loopback mock SSE endpoint; no external provider).
 - `node scripts/probe-tui.ts` — actual native TUI in a separate PTY with mock
   provider; successful logs in ignored `tmp/native-probe-UrcNNR/` and a later
@@ -354,13 +354,15 @@ returned unlabelled message/tool text and that child token/cost usage never
 reached the parent. The offline suite asserts that:
 
 - running `read` labels entries (`assistant:`, `tool bash:`, `user:`);
-- stopping mid-turn keeps the partial assistant text and recent tools readable;
+- stopping mid-turn keeps the partial assistant text and interrupted tool output
+  readable, and stopping twice does not discard it;
+- transcript text preserves code spacing/newlines while stripping terminal escapes;
 - the header shows the resolved model reported by `get_state`
   (`j1 finished · fake-model/fake`);
 - the completion notice still contains no result body, and says settled children
-  retain memory until `subagent stop`;
-- `list` adds that reminder only while a settled child remains, and `read` ends a
-  settled/stopped result with the matching retention note.
+  retain memory until parent shutdown while `subagent stop` releases any live process;
+- `list` adds that reminder only while a settled child remains, and `read` keeps
+  the matching retention note even when the body is truncated.
 
 `spawn` now echoes the requested `provider/model` in its immediate reply, so a
 wrong model is visible before the child starts; `read` shows the resolved model

@@ -233,7 +233,9 @@ export class AgentViewer {
       const tool = new ToolExecutionComponent(name, activity.id, cleanValue(activity.args), { showImages: false }, this.definitions[activity.name] ?? this.definitions[name], this.tui, this.cwd);
       // Observer snapshots do not own execution clocks. Marking execution started
       // would start native renderer timers with no public disposal hook on close.
-      tool.setArgsComplete(); tool.setExpanded(true);
+      // The edit renderer rereads the file on args-complete, outside our sanitization.
+      if (activity.name !== 'edit' && name !== 'edit') tool.setArgsComplete();
+      tool.setExpanded(true);
       const result = cleanResult(results.get(activity.id) ?? activity.result);
       if (result) tool.updateResult({ ...result, content: result.content ?? [], isError: result.isError ?? activity.isError ?? false }, activity.running);
       this.content.addChild(tool);

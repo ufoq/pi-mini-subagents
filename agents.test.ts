@@ -144,6 +144,7 @@ test('sanitize strips OSC/BEL/ST, CSI and controls without eating visible text',
   assert.equal(sanitize('a\x9d8;;u\x1b\\LINK\x9d8;;\x07z'), 'aLINKz');
   assert.equal(sanitize('a\x1b]8;;u\x9cLINK\x1b]8;;\x9cz'), 'aLINKz');
   assert.equal(sanitize('a\x1bPdcs\x9cVISIBLE'), 'aVISIBLE');
+  assert.equal(sanitize('a\x1b[\x1b]52;c;SECRET\x07z'), 'az');
   assert.equal(sanitize('a\x90dcs\x1b\\VISIBLE'), 'aVISIBLE');
 });
 
@@ -159,13 +160,28 @@ test('historical completed tools do not crowd current activity out of a read', (
   const messages = Array.from({ length: 30 }, (_, i) => ({
     role: 'toolResult', toolCallId: `old${i}`, toolName: 'bash', content: [{ type: 'text', text: `old output ${i}` }],
   }));
-  const snapshot: any = {
-    status: 'running', messages,
-    tools: { current: { id: 'current', name: 'bash', args: { command: 'now' }, running: false, result: { content: [{ type: 'text', text: 'CURRENT OUTPUT' }] } } },
-  };
+  const tools: any = Object.fromEntries(messages.map((m, i) => [m.toolCallId, {
+    id: m.toolCallId, name: 'bash', args: { command: `old ${i}` }, running: false,
+    result: { content: [{ type: 'text', text: `old output ${i}` }] },
+  }]));
+  tools.current = { id: 'current', name: 'bash', args: { command: 'now' }, running: false, result: { content: [{ type: 'text', text: 'CURRENT OUTPUT' }] } };
+  const snapshot: any = { status: 'running', messages, tools };
   const text = transcript(snapshot);
   assert.match(text, /tool bash: CURRENT OUTPUT/);
   assert.ok(!text.includes('old output 0'), 'authoritative historical tools are not replayed as activity');
+});
+
+test('live activity survives many completed parallel siblings in a bounded read', async () => {
+  const { agents, processes } = setup();
+  try {
+    const id = agents.spawn('many parallel tools', invocation);
+    await until(() => agents.snapshot(id).status === 'running');
+    await processes[0].request('manyparallel');
+    await until(() => !!agents.snapshot(id).tools.live?.result);
+    const text = agents.read(id);
+    assert.match(text, /tool bash \(running\): .*LIVE OUTPUT/);
+    assert.ok(text.length <= 8000, 'the read stays bounded');
+  } finally { await agents.shutdown(); }
 });
 
 test('a completed parallel tool stays readable before its toolResult arrives', async () => {

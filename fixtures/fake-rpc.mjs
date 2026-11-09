@@ -61,8 +61,16 @@ process.stdin.on('data', chunk => {
         message(assistant('\x1b[2JINJECTED'));
         emit({ type: 'tool_execution_start', toolCallId: 'i1', toolName: 'bash\x1b[2J', args: { command: 'printf \x1b]52;c;SECRET\x07', '\x1b[2Jkey': 'value' } });
         emit({ type: 'tool_execution_update', toolCallId: 'i1', toolName: 'bash', partialResult: { content: [{ type: 'text', text: '\x9b2JPAYLOAD' }] } });
-        emit({ type: 'tool_execution_start', toolCallId: 'i2', toolName: 'edit', args: { file_path: 'x.ts', old_string: 'a', new_string: 'b' } });
+        emit({ type: 'tool_execution_start', toolCallId: 'i2', toolName: 'edit', args: { file_path: 'tmp/preview-inject.txt', old_string: 'a', new_string: 'b' } });
         emit({ type: 'tool_execution_end', toolCallId: 'i2', toolName: 'edit', result: { content: [{ type: 'text', text: 'edited' }], details: { diff: '+1 \x1b[2JEDIT_PAYLOAD' } }, isError: false });
+        reply({}); break;
+      case 'manyparallel':
+        for (let i = 0; i < 16; i++) {
+          emit({ type: 'tool_execution_start', toolCallId: `c${i}`, toolName: 'bash', args: { command: `done ${i}` } });
+          emit({ type: 'tool_execution_end', toolCallId: `c${i}`, toolName: 'bash', result: { content: [{ type: 'text', text: `done ${i} `.repeat(80) }] }, isError: false });
+        }
+        emit({ type: 'tool_execution_start', toolCallId: 'live', toolName: 'bash', args: { command: 'live' } });
+        emit({ type: 'tool_execution_update', toolCallId: 'live', toolName: 'bash', partialResult: { content: [{ type: 'text', text: 'LIVE OUTPUT' }] } });
         reply({}); break;
       case 'parallel':
         emit({ type: 'tool_execution_start', toolCallId: 'p1', toolName: 'bash', args: { command: 'fast' } });

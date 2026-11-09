@@ -33,7 +33,7 @@ export function childInvocation(cwd: string, model?: { provider: string; id: str
 export function messageText(message?: RecordData): string {
   if (!message) return '';
   if (typeof message.content === 'string') return message.content;
-  return (message.content ?? []).map((c: RecordData) => c.type === 'text' ? c.text : c.type === 'toolCall' ? `${c.name} ${JSON.stringify(c.arguments)}` : '').filter(Boolean).join('\n');
+  return (message.content ?? []).filter((c: RecordData) => c.type === 'text').map((c: RecordData) => c.text).filter(Boolean).join('\n');
 }
 /** One line with no terminal escapes or control characters. */
 export function plain(text: string): string {
@@ -62,6 +62,7 @@ function skipString(text: string, start: number) {
 function skipCsi(text: string, start: number) {
   for (let i = start; i < text.length; i++) {
     const code = text.charCodeAt(i);
+    if (code === 0x1b || code === 0x9b || code === 0x9d || code === 0x90 || code === 0x98 || code === 0x9e || code === 0x9f) return i - 1;
     if (code >= 0x40 && code <= 0x7e) return i;
   }
   return text.length;
@@ -95,39 +96,50 @@ const clip = (text: string, limit = 500) => {
   const value = sanitize(text);
   return [...value].length <= limit ? value : [...value].slice(0, limit).join('') + '…';
 };
+function sanitizeValue(value: unknown): unknown {
+  if (typeof value === 'string') return sanitize(value);
+  if (Array.isArray(value)) return value.map(sanitizeValue);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [sanitize(key), sanitizeValue(item)]));
+  return value;
+}
+function argsText(args: unknown) {
+  try { return JSON.stringify(sanitizeValue(args)); } catch { return String(args); }
+}
 /** One attributed line per message/tool call, so `read` does not dump an unlabelled wall. */
 export function transcript(c: Snapshot): string {
-  const lines: string[] = [];
+  const live: string[] = [];
+  const recentLines: string[] = [];
+  const completed: string[] = [];
   const recent = c.messages.slice(-8);
   const shown = new Set(c.messages.filter(m => m.role === 'toolResult').map(m => m.toolCallId));
   for (const m of recent) {
     if (m.role === 'toolResult') {
-      lines.push(`tool ${sanitize(String(m.toolName ?? '?'))}${m.isError ? ' (error)' : ''}: ${clip(messageText(m))}`);
+      recentLines.push(`tool ${sanitize(String(m.toolName ?? '?'))}${m.isError ? ' (error)' : ''}: ${clip(messageText(m))}`);
     } else if (m.role === 'assistant') {
       const calls = (m.content ?? []).filter((x: RecordData) => x.type === 'toolCall').map((x: RecordData) => sanitize(String(x.name ?? '?')));
       const text = messageText(m);
-      lines.push(`assistant: ${clip(text || '(no text)')}${calls.length ? ` [called ${calls.join(', ')}]` : ''}`);
+      recentLines.push(`assistant: ${clip(text || '(no text)')}${calls.length ? ` [called ${calls.join(', ')}]` : ''}`);
     } else if (m.role === 'user') {
-      lines.push(`user: ${clip(messageText(m))}`);
+      recentLines.push(`user: ${clip(messageText(m))}`);
     } else {
-      lines.push(`${sanitize(String(m.role ?? 'message'))}: ${clip(messageText(m))}`);
+      recentLines.push(`${sanitize(String(m.role ?? 'message'))}: ${clip(messageText(m))}`);
     }
   }
-  if (c.streaming) lines.push(`assistant (streaming): ${clip(messageText(c.streaming))}`);
-  if (c.interrupted) lines.push(`assistant (interrupted): ${clip(c.interrupted)}`);
+  if (c.streaming) live.push(`assistant (streaming): ${clip(messageText(c.streaming))}`);
+  if (c.interrupted) live.push(`assistant (interrupted): ${clip(c.interrupted)}`);
   for (const tool of Object.values(c.tools)) {
     if (shown.has(tool.id)) continue;
     const name = sanitize(String(tool.name));
     if (tool.running) {
-      lines.push(`tool ${name} (running): ${clip(JSON.stringify(tool.args))}${tool.result ? ` → ${clip(messageText(tool.result))}` : ''}`);
+      live.push(`tool ${name} (running): ${clip(argsText(tool.args))}${tool.result ? ` → ${clip(messageText(tool.result))}` : ''}`);
     } else if (tool.interrupted) {
-      lines.push(`tool ${name} (interrupted): ${clip(JSON.stringify(tool.args))}${tool.result ? ` → ${clip(messageText(tool.result))}` : ''}`);
+      live.push(`tool ${name} (interrupted): ${clip(argsText(tool.args))}${tool.result ? ` → ${clip(messageText(tool.result))}` : ''}`);
     } else if (tool.result) {
       // Parallel batches can finish a tool before Pi emits its toolResult message.
-      lines.push(`tool ${name}: ${clip(messageText(tool.result))}`);
+      completed.push(`tool ${name}: ${clip(messageText(tool.result))}`);
     }
   }
-  return lines.filter(Boolean).join('\n');
+  return [...live, ...recentLines, ...completed].join('\n');
 }
 function requireMessage(message: string) {
   if (typeof message !== 'string' || !message.trim()) throw new Error('A non-empty message is required.');

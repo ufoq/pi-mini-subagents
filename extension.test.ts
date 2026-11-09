@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { rm, writeFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { load } from './fixtures/pi-loader.ts';
 import { Agents } from './agents.ts';
@@ -374,6 +375,7 @@ test('viewer sanitizes child text, arguments and results before rendering', asyn
     assert.fail('condition not reached');
   };
   try {
+    await writeFile('tmp/preview-inject.txt', 'a\n\x1b[2JFILE_PAYLOAD\n');
     await wait(() => agents.status(id) === 'running');
     await (agents as any).children.get(id).rpc.request('inject');
     await wait(() => !!agents.snapshot(id).tools.i1?.result);
@@ -387,5 +389,7 @@ test('viewer sanitizes child text, arguments and results before rendering', asyn
     assert.ok(!detail.includes('\x9b'), '8-bit CSI is stripped from tool results');
     assert.ok(!detail.includes('52;c;SECRET'), 'OSC payload does not leak as visible text');
     assert.ok(!agents.read(id).includes('\x1b'), 'tool names are sanitized in read too');
-  } finally { viewer.dispose(); await agents.shutdown(); }
+    assert.ok(!agents.read(id).includes('52;c;SECRET'), 'parent tool arguments are sanitized before JSON encoding');
+    assert.ok(!detail.includes('FILE_PAYLOAD'), 'the edit renderer never reads the file for a preview');
+  } finally { viewer.dispose(); await agents.shutdown(); await rm('tmp/preview-inject.txt', { force: true }); }
 });

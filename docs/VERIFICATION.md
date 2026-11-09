@@ -13,7 +13,7 @@ name that was actually installed and tested at the time.
 - `./scripts/test rpc.test.ts`
 - `./scripts/test extension.test.ts`
 - `./scripts/test native-rpc.test.ts`
-- `./scripts/test` — **37 passing tests**, deterministic offline suite (includes real Pi processes
+- `./scripts/test` — **38 passing tests**, deterministic offline suite (includes real Pi processes
   against a loopback mock SSE endpoint; no external provider).
 - `node scripts/probe-tui.ts` — actual native TUI in a separate PTY with mock
   provider; successful logs in ignored `tmp/native-probe-UrcNNR/` and a later
@@ -364,6 +364,12 @@ reached the parent. The offline suite asserts that:
 - the stopped viewer keeps a long interrupted answer that `read` clips per item;
 - the viewer sanitizes child text, status, tool arguments, keys, results and
   `details.diff` before native renderers see them, without stripping renderer styling;
+- the edit renderer never receives an args-complete signal, so it cannot reread a
+  file and render unsanitized preview content behind the sanitizer;
+- cancelled CSI sequences restart at the new introducer instead of consuming an OSC
+  payload, and tool arguments are sanitized before JSON encoding;
+- live/interrupted activity is ordered before recent history and completed siblings,
+  so it survives the read bound even with many completed parallel tools;
 - a completed parallel tool is visible before Pi emits its `toolResult` message and
   remains visible after stop, exactly once;
 - historical completed tools are deduplicated against all `toolResult` messages, so

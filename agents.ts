@@ -148,18 +148,24 @@ function argsText(args: unknown) {
   try { return JSON.stringify(sanitizeValue(args)); } catch { return String(args); }
 }
 interface PreparedMessages {
-  rows: Array<{ message: RecordData; text: string }>;
+  rows: Array<{ message: RecordData; text: string; error?: string }>;
   lastAssistant?: string;
+  lastError?: string;
+  lastErrorRaw?: string;
 }
 function prepareMessages(c: Snapshot, clean: (text: string) => string): PreparedMessages {
   const rows: PreparedMessages['rows'] = [];
   let lastAssistant: string | undefined;
+  let lastError: string | undefined;
+  let lastErrorRaw: string | undefined;
   for (const message of c.messages) {
     const text = clean(messageText(message));
-    rows.push({ message, text });
+    const error = typeof message.errorMessage === 'string' ? clean(message.errorMessage) : undefined;
+    rows.push({ message, text, error });
     if (message.role === 'assistant') lastAssistant = text;
+    if (error !== undefined) { lastError = error; lastErrorRaw = message.errorMessage; }
   }
-  return { rows, lastAssistant };
+  return { rows, lastAssistant, lastError, lastErrorRaw };
 }
 /** One attributed line per message/tool call, so `read` does not dump an unlabelled wall. */
 export function transcript(c: Snapshot, prepared?: PreparedMessages, clean?: (text: string) => string): string {
@@ -282,7 +288,7 @@ export class Agents {
     const prepared = prepareMessages(c, clean);
     const last = c.messages.findLast(m => m.role === 'assistant');
     const lastText = last ? messageText(last) : '';
-    const error = c.error ? clean(c.error) : '';
+    const error = c.error ? (c.error === prepared.lastErrorRaw ? prepared.lastError ?? '' : clean(c.error)) : '';
     const result = c.result ? (c.result === lastText ? prepared.lastAssistant ?? '' : clean(c.result)) : '';
     if (c.status === 'stopped') {
       const shown = transcript(c, prepared, clean);

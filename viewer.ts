@@ -258,6 +258,7 @@ export class AgentViewer {
       if (message.role !== 'assistant') continue;
       for (const call of message.content ?? []) {
         if (call.type !== 'toolCall') continue;
+        if (call.partialArguments || message.stopReason === 'error' || message.stopReason === 'aborted') continue;
         const id = String(call.id);
         totalCalls.set(id, (totalCalls.get(id) ?? 0) + 1);
       }
@@ -311,6 +312,7 @@ export class AgentViewer {
         for (const call of message.content ?? []) {
           if (call.type !== 'toolCall') continue;
           if (call.partialArguments) this.content.addChild(new Text(`${sanitize(String(call.name))} (preparing arguments)`, 0, 0));
+          else if (message.stopReason === 'error' || message.stopReason === 'aborted') this.content.addChild(new Text(`${sanitize(String(call.name))} (not executed)`, 0, 0));
           else showCall(call);
         }
       } else if (message.role !== 'toolResult' && message.role !== 'system') {

@@ -40,6 +40,7 @@ test('one compact tool, actionable validation, exact completion-only delivery an
   assert.ok(!content.includes('SECRET RESULT'));
   assert.equal(startingReply('j1'), 'j1 starting. Parent may continue; completion will notify. Results require read.');
   assert.match(startingReply('j1', { provider: 'mock', id: 'alias/model' }), /starting on mock\/alias\/model/);
+  assert.ok(!startingReply('j1', { provider: 'p\x1b]52;c;SECRET\x07', id: 'model' }).includes('SECRET'), 'inherited model echo is sanitized');
   assert.match(listReply([{ id: 'j1', status: 'finished', task: 'review' }]), /subagent stop releases any live child process/);
   assert.ok(!listReply([{ id: 'j1', status: 'running', task: 'review' }]).includes('subagent stop'));
   assert.equal(listReply([]), 'No subagents.');
@@ -439,6 +440,25 @@ test('a partial tool-call preview never shows encoded control payloads', async (
     const detail = viewer.render(120).join('\n');
     assert.match(detail, /preparing arguments/);
     assert.ok(!detail.includes('SECRET'), 'serialized JSON escapes are not rendered as a payload');
+  } finally { viewer.dispose(); await agents.shutdown(); }
+});
+
+test('an unexecuted partial call does not consume a later reused id result', async () => {
+  const agents = new Agents(() => {});
+  const plainTheme = { fg: (_: string, s: string) => s, bg: (_: string, s: string) => s, bold: (s: string) => s };
+  const id = agents.spawn('unexecuted call', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
+  const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 40 } }, plainTheme, () => {}, process.cwd(), id);
+  const wait = async (fn: () => boolean) => {
+    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    assert.fail('condition not reached');
+  };
+  try {
+    await wait(() => agents.status(id) === 'running');
+    await (agents as any).children.get(id).rpc.request('unexecuted');
+    await wait(() => agents.snapshot(id).messages.some(m => m.role === 'toolResult' && m.toolCallId === 'u1'));
+    const detail = viewer.render(120).join('\n');
+    assert.match(detail, /bash \(not executed\)/);
+    assert.equal((detail.match(/RAN RESULT/g) ?? []).length, 1, 'the result belongs only to the executed call');
   } finally { viewer.dispose(); await agents.shutdown(); }
 });
 

@@ -216,6 +216,27 @@ test('a control string split across messages stays hidden in read', async () => 
   } finally { await agents.shutdown(); }
 });
 
+test('historical diagnostics are processed in message order for read', async () => {
+  const first = setup();
+  try {
+    const id = first.agents.spawn('diagnostic recover', invocation);
+    await until(() => first.agents.snapshot(id).status === 'running');
+    await first.processes[0].request('diagnosticrecover');
+    await until(() => first.agents.status(id) === 'finished');
+    assert.match(first.agents.read(id), /NORMAL_RESULT/, 'the retry is not hidden by an earlier unclosed control string');
+  } finally { await first.agents.shutdown(); }
+  const second = setup();
+  try {
+    const id = second.agents.spawn('diagnostic pair', invocation);
+    await until(() => second.agents.snapshot(id).status === 'running');
+    await second.processes[0].request('diagnosticpair');
+    await until(() => second.agents.status(id) === 'failed');
+    const text = second.agents.read(id);
+    assert.match(text, /AFTER/);
+    assert.ok(!text.includes('SECRET'), 'an earlier diagnostic cannot expose a later diagnostic payload');
+  } finally { await second.agents.shutdown(); }
+});
+
 test('failed diagnostics keep the message sanitizer state and ids are sanitized before quoting', async () => {
   const { agents, processes } = setup();
   try {

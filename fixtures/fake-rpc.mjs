@@ -74,6 +74,23 @@ process.stdin.on('data', chunk => {
         emit({ type: 'tool_execution_start', toolCallId: 'live', toolName: 'bash', args: { command: 'live' } });
         emit({ type: 'tool_execution_update', toolCallId: 'live', toolName: 'bash', partialResult: { content: [{ type: 'text', text: 'LIVE OUTPUT' }] } });
         reply({}); break;
+      case 'diagnosticrecover':
+        message(assistant('\x1b]52;c;', { stopReason: 'error', errorMessage: 'SECRET\x07AFTER' }));
+        message(assistant('NORMAL_RESULT'));
+        emit({ type: 'agent_settled', aborted: false });
+        reply({}); break;
+      case 'diagnosticpair':
+        message(assistant('', { stopReason: 'error', errorMessage: '\x1b]52;c;' }));
+        message(assistant('', { stopReason: 'error', errorMessage: 'SECRET\x07AFTER' }));
+        emit({ type: 'agent_settled', aborted: false });
+        reply({}); break;
+      case 'unexecuted':
+        message(assistant('', { content: [{ type: 'toolCall', id: 'u1', name: 'bash', arguments: { command: 'NEVER' } }], stopReason: 'error', errorMessage: 'not executed' }));
+        message(assistant('', { content: [{ type: 'toolCall', id: 'u1', name: 'bash', arguments: { command: 'RAN' } }], stopReason: 'toolUse' }));
+        emit({ type: 'tool_execution_start', toolCallId: 'u1', toolName: 'bash', args: { command: 'RAN' } });
+        emit({ type: 'tool_execution_end', toolCallId: 'u1', toolName: 'bash', result: { content: [{ type: 'text', text: 'RAN RESULT' }] }, isError: false });
+        message({ role: 'toolResult', toolCallId: 'u1', toolName: 'bash', content: [{ type: 'text', text: 'RAN RESULT' }], isError: false });
+        reply({}); break;
       case 'failsplit':
         message(assistant('\x1b]52;c;'));
         message(assistant('', { stopReason: 'error', errorMessage: 'SECRET\x07AFTER' }));

@@ -8,7 +8,7 @@ export function completionNotification(id: string, status: Status) {
 }
 
 export function startingReply(id: string, model?: { provider: string; id: string }) {
-  return `${id} starting${model ? ` on ${model.provider}/${model.id}` : ''}. Parent may continue; completion will notify. Results require read.`;
+  return `${id} starting${model ? ` on ${sanitize(model.provider)}/${sanitize(model.id)}` : ''}. Parent may continue; completion will notify. Results require read.`;
 }
 
 export function listReply(rows: { id: string; status: Status; task: string }[]) {

@@ -209,6 +209,9 @@ process.stdin.on('data', chunk => {
       case 'longfail':
         message(assistant('A'.repeat(600) + '\nTAIL_MARKER', { stopReason: 'error', errorMessage: 'provider unavailable' }));
         active = false; emit({ type: 'agent_settled', aborted: false }); reply({}); break;
+      case 'longfinish':
+        message(assistant('A'.repeat(600) + '\nTAIL_MARKER'));
+        active = false; emit({ type: 'agent_settled', aborted: false }); reply({}); break;
       case 'provider_error': message(assistant('', { stopReason: 'error', errorMessage: 'provider unavailable' })); active = false; emit({ type: 'agent_settled', aborted: false }); reply({}); break;
       case 'unicode': {
         const bytes = Buffer.from(JSON.stringify({ type: 'unicode', text: '中\u2028\u2029🙂' }) + '\r\n');

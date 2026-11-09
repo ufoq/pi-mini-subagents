@@ -307,7 +307,8 @@ export class Agents {
     if (c.status === 'stopped') {
       const shown = transcript(c, prepared, clean);
       // The transcript already shows the latest assistant text, so avoid repeating it.
-      const retained = result && !shown.includes(trim(result)) ? result : '';
+      // Deduplicate against the full result, not its clipped preview.
+      const retained = result && !shown.includes(result) ? result : '';
       return bounded([header, error, retained, shown].filter(Boolean).join('\n'), 'stopped: transcript retained in memory until parent shutdown');
     }
     if (c.status !== 'running' && c.status !== 'starting') {

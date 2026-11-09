@@ -231,6 +231,18 @@ test('a follow-up that starts as the previous turn settles stays running', async
   } finally { await agents.shutdown(); }
 });
 
+test('a stopped child keeps a long settled result beyond the transcript preview', async () => {
+  const { agents, processes } = setup();
+  try {
+    const id = agents.spawn('long finish', invocation);
+    await until(() => agents.status(id) === 'running');
+    await processes[0].request('longfinish');
+    await until(() => agents.status(id) === 'finished');
+    await agents.stop(id);
+    assert.match(agents.read(id), /TAIL_MARKER/, 'stop must not reduce the settled result to the 500-char preview');
+  } finally { await agents.shutdown(); }
+});
+
 test('a send that dies before starting does not expose the previous result', async () => {
   const { agents, processes } = setup();
   try {

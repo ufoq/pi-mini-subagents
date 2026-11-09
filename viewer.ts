@@ -235,24 +235,60 @@ export class AgentViewer {
 
   private rebuild(snapshot: Snapshot) {
     this.content.clear();
-    const shownTools = new Set<ToolActivity>();
+    const shownActivities = new Set<ToolActivity>();
     const cleanText = createSanitizer();
     const messages = snapshot.messages.map(message => cleanMessage(message, cleanText));
     const streaming = snapshot.streaming ? cleanMessage(snapshot.streaming, cleanText) : undefined;
-    const results = new Map(messages.filter(m => m.role === 'toolResult').map(m => [m.toolCallId, m]));
-    const showTool = (activity: ToolActivity) => {
-      if (shownTools.has(activity)) return;
-      shownTools.add(activity);
-      const name = sanitize(String(activity.name));
-      const tool = new ToolExecutionComponent(name, activity.id, cleanValue(activity.args), { showImages: false }, this.definitions[activity.name] ?? this.definitions[name], this.tui, this.cwd);
+    const resultsById = new Map<string, any[]>();
+    for (const message of messages) {
+      if (message.role !== 'toolResult') continue;
+      const id = String(message.toolCallId);
+      resultsById.set(id, [...(resultsById.get(id) ?? []), message]);
+    }
+    const totalCalls = new Map<string, number>();
+    for (const message of messages) {
+      if (message.role !== 'assistant') continue;
+      for (const call of message.content ?? []) {
+        if (call.type !== 'toolCall') continue;
+        const id = String(call.id);
+        totalCalls.set(id, (totalCalls.get(id) ?? 0) + 1);
+      }
+    }
+    const seenCalls = new Map<string, number>();
+    const toolComponent = (rawName: string, id: string, args: any) => {
+      const name = sanitize(rawName);
+      const tool = new ToolExecutionComponent(name, id, cleanValue(args), { showImages: false }, this.definitions[rawName] ?? this.definitions[name], this.tui, this.cwd);
       // Observer snapshots do not own execution clocks. Marking execution started
       // would start native renderer timers with no public disposal hook on close.
       // The edit renderer rereads the file on args-complete, outside our sanitization.
-      if (activity.name !== 'edit' && name !== 'edit') tool.setArgsComplete();
+      if (rawName !== 'edit' && name !== 'edit') tool.setArgsComplete();
       tool.setExpanded(true);
-      const fromMessages = activity.reported ? results.get(activity.id) : undefined;
-      const result = fromMessages ?? (activity.result ? cleanResult(activity.result, cleanText) : undefined);
+      return tool;
+    };
+    const showCall = (call: any) => {
+      const id = String(call.id);
+      const occurrence = seenCalls.get(id) ?? 0;
+      seenCalls.set(id, occurrence + 1);
+      const tool = toolComponent(String(call.name), id, call.arguments);
+      const fromMessages = resultsById.get(id)?.[occurrence];
+      const latest = occurrence === (totalCalls.get(id) ?? 1) - 1;
+      const activity = latest ? snapshot.tools[id] : undefined;
+      const current = fromMessages ? undefined : activity;
+      const result = fromMessages ?? (current?.result ? cleanResult(current.result, cleanText) : undefined);
+      if (result) tool.updateResult({ ...result, content: result.content ?? [], isError: result.isError ?? current?.isError ?? false }, current?.running ?? false);
+      if (current) shownActivities.add(current);
+      this.content.addChild(tool);
+    };
+    const showActivity = (activity: ToolActivity) => {
+      if (shownActivities.has(activity)) return;
+      const hasCall = (seenCalls.get(activity.id) ?? 0) > 0;
+      if (activity.reported && hasCall) return;
+      const tool = toolComponent(String(activity.name), activity.id, activity.args);
+      const fromMessages = hasCall ? undefined : resultsById.get(activity.id)?.at(-1);
+      const raw = fromMessages ? undefined : activity.result;
+      const result = fromMessages ?? (raw ? cleanResult(raw, cleanText) : undefined);
       if (result) tool.updateResult({ ...result, content: result.content ?? [], isError: result.isError ?? activity.isError ?? false }, activity.running);
+      shownActivities.add(activity);
       this.content.addChild(tool);
     };
     const interrupted = snapshot.interrupted === undefined ? [] : [{
@@ -266,15 +302,15 @@ export class AgentViewer {
         this.content.addChild(assistant);
         for (const call of message.content ?? []) {
           if (call.type !== 'toolCall') continue;
-          if (call.partialArguments) this.content.addChild(new Text(`${sanitize(String(call.name))} ${sanitize(String(call.partialArguments))}`, 0, 0));
-          else showTool(snapshot.tools[call.id] ?? { id: call.id, name: call.name, args: call.arguments, running: !results.has(call.id) });
+          if (call.partialArguments) this.content.addChild(new Text(`${sanitize(String(call.name))} (preparing arguments)`, 0, 0));
+          else showCall(call);
         }
       } else if (message.role !== 'toolResult' && message.role !== 'system') {
         this.content.addChild(new Text(messageText(message) || message.summary || `[${sanitize(String(message.role))}]`, 0, 0));
       }
     }
     // Executions can start before a finalized assistant/tool-result message.
-    for (const activity of Object.values(snapshot.tools)) showTool(activity);
+    for (const activity of Object.values(snapshot.tools)) showActivity(activity);
   }
 }
 

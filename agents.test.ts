@@ -160,6 +160,10 @@ test('sanitize strips OSC/BEL/ST, CSI and controls without eating visible text',
   assert.deepEqual(sanitizeMany(['\x1bPq', 'SECRET\x1b\\AFTER']), ['', 'AFTER']);
   assert.deepEqual(sanitizeMany(['\x1b', ']52;c;SECRET\x07AFTER']), ['', 'AFTER']);
   assert.deepEqual(sanitizeMany(['\x1bPqSECRET\x1b', '\\AFTER']), ['', 'AFTER']);
+  assert.deepEqual(sanitizeMany(['\x1b[', '12mVISIBLE']), ['', 'VISIBLE']);
+  assert.deepEqual(sanitizeMany(['\x1b]52;c;SEC', 'RET\x07AFTER']), ['', 'AFTER']);
+  assert.equal(sanitize('\x1bXpayload\x18VISIBLE'), 'VISIBLE');
+  assert.equal(sanitize('\x1b^payload\x9cVISIBLE'), 'VISIBLE');
   assert.equal(sanitize('a\x90dcs\x1b\\VISIBLE'), 'aVISIBLE');
 });
 
@@ -209,6 +213,23 @@ test('a control string split across messages stays hidden in read', async () => 
     const text = agents.read(id);
     assert.match(text, /AFTER/);
     assert.ok(!text.includes('SECRET'), 'the split OSC payload is not exposed');
+  } finally { await agents.shutdown(); }
+});
+
+test('settled and stopped results keep the message sanitizer state', async () => {
+  const { agents, processes } = setup();
+  try {
+    const id = agents.spawn('settled split', invocation);
+    await until(() => agents.snapshot(id).status === 'running');
+    await processes[0].request('settlesplit');
+    await until(() => agents.status(id) === 'finished');
+    const settled = agents.read(id);
+    assert.match(settled, /AFTER/);
+    assert.ok(!settled.includes('SECRET'), 'settlement does not reset control-string state');
+    await agents.stop(id);
+    const stopped = agents.read(id);
+    assert.match(stopped, /AFTER/);
+    assert.ok(!stopped.includes('SECRET'), 'the stopped retained-result path does not expose it either');
   } finally { await agents.shutdown(); }
 });
 

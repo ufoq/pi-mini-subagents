@@ -148,17 +148,30 @@ function sanitizeValue(value: unknown): unknown {
 function argsText(args: unknown) {
   try { return JSON.stringify(sanitizeValue(args)); } catch { return String(args); }
 }
+interface PreparedMessages {
+  rows: Array<{ message: RecordData; text: string }>;
+  lastAssistant?: string;
+}
+function prepareMessages(c: Snapshot, clean: (text: string) => string): PreparedMessages {
+  const rows: PreparedMessages['rows'] = [];
+  let lastAssistant: string | undefined;
+  for (const message of c.messages) {
+    const text = clean(messageText(message));
+    rows.push({ message, text });
+    if (message.role === 'assistant') lastAssistant = text;
+  }
+  return { rows, lastAssistant };
+}
 /** One attributed line per message/tool call, so `read` does not dump an unlabelled wall. */
-export function transcript(c: Snapshot): string {
+export function transcript(c: Snapshot, prepared?: PreparedMessages, clean?: (text: string) => string): string {
+  if (!clean) clean = createSanitizer();
+  if (!prepared) prepared = prepareMessages(c, clean);
   const live: string[] = [];
   const recentLines: string[] = [];
   const completed: string[] = [];
-  const clean = createSanitizer();
-  const recentStart = Math.max(0, c.messages.length - 8);
-  for (let index = 0; index < c.messages.length; index++) {
-    const m = c.messages[index];
-    const text = clean(messageText(m));
-    if (index < recentStart) continue;
+  const recentStart = Math.max(0, prepared.rows.length - 8);
+  for (let index = recentStart; index < prepared.rows.length; index++) {
+    const { message: m, text } = prepared.rows[index];
     if (m.role === 'toolResult') {
       recentLines.push(`tool ${sanitize(String(m.toolName ?? '?'))}${m.isError ? ' (error)' : ''}: ${trim(text)}`);
     } else if (m.role === 'assistant') {
@@ -185,7 +198,7 @@ export function transcript(c: Snapshot): string {
       completed.push(`tool ${name}: ${result}`);
     }
   }
-  return sanitize([...live, ...recentLines, ...completed].join('\n'));
+  return [...live, ...recentLines, ...completed].join('\n');
 }
 function requireMessage(message: string) {
   if (typeof message !== 'string' || !message.trim()) throw new Error('A non-empty message is required.');
@@ -266,18 +279,22 @@ export class Agents {
   read(id: string): string {
     const c = this.get(id);
     const header = `${id} ${c.status}${c.model ? ` · ${sanitize(c.model)}` : ''}`;
-    const error = c.error ? sanitize(c.error) : '';
-    const result = c.result ? sanitize(c.result) : '';
+    const clean = createSanitizer();
+    const prepared = prepareMessages(c, clean);
+    const last = c.messages.findLast(m => m.role === 'assistant');
+    const lastText = last ? messageText(last) : '';
+    const error = c.error ? clean(c.error) : '';
+    const result = c.result ? (c.result === lastText ? prepared.lastAssistant ?? '' : clean(c.result)) : '';
     if (c.status === 'stopped') {
-      const shown = transcript(c);
+      const shown = transcript(c, prepared, clean);
       // The transcript already shows the latest assistant text, so avoid repeating it.
-      const retained = result && !shown.includes(clip(result)) ? result : '';
+      const retained = result && !shown.includes(trim(result)) ? result : '';
       return bounded([header, error, retained, shown].filter(Boolean).join('\n'), 'stopped: transcript retained in memory until parent shutdown');
     }
     if (c.status !== 'running' && c.status !== 'starting') {
       return bounded([header, error, result].filter(Boolean).join('\n'), 'retained: transcript in memory; subagent stop releases any live child process');
     }
-    return bounded([header, transcript(c)].filter(Boolean).join('\n'));
+    return bounded([header, transcript(c, prepared, clean)].filter(Boolean).join('\n'));
   }
 
   async send(id: string, message: string): Promise<void> {

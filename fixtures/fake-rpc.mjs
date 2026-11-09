@@ -35,8 +35,9 @@ process.stdin.on('data', chunk => {
         emit({ type: 'agent_start' });
         emit({ type: 'message_start', message: assistant('', { stopReason: 'pending' }) });
         emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'working …\u2028中' } });
-        message(assistant('starting', { content: [{ type: 'toolCall', id: 't1', name: 'bash', arguments: { command: 'example' } }], stopReason: 'toolUse' }));
-        emit({ type: 'tool_execution_start', toolCallId: 't1', toolName: 'bash', args: { command: 'example' } });
+        const command = messages.filter(m => m.role === 'user').length > 1 ? 'second' : 'example';
+        message(assistant('starting', { content: [{ type: 'toolCall', id: 't1', name: 'bash', arguments: { command } }], stopReason: 'toolUse' }));
+        emit({ type: 'tool_execution_start', toolCallId: 't1', toolName: 'bash', args: { command } });
         emit({ type: 'tool_execution_update', toolCallId: 't1', toolName: 'bash', partialResult: { content: [{ type: 'text', text: 'live output' }] } });
         if (c.message === 'crash') { process.stderr.write('useful crash diagnostic'); process.exit(7); }
         if (c.message === 'malformed') { process.stdout.write('not-json\n'); break; }
@@ -72,6 +73,16 @@ process.stdin.on('data', chunk => {
         }
         emit({ type: 'tool_execution_start', toolCallId: 'live', toolName: 'bash', args: { command: 'live' } });
         emit({ type: 'tool_execution_update', toolCallId: 'live', toolName: 'bash', partialResult: { content: [{ type: 'text', text: 'LIVE OUTPUT' }] } });
+        reply({}); break;
+      case 'settlesplit':
+        message(assistant('\x1b]52;c;'));
+        message(assistant('SECRET\x07AFTER'));
+        emit({ type: 'agent_settled', aborted: false });
+        reply({}); break;
+      case 'partialinject':
+        emit({ type: 'message_start', message: assistant('', { content: [], stopReason: 'pending' }) });
+        emit({ type: 'message_update', assistantMessageEvent: { type: 'toolcall_start', contentIndex: 0, id: 'pt', toolName: 'bash' } });
+        emit({ type: 'message_update', assistantMessageEvent: { type: 'toolcall_delta', contentIndex: 0, delta: '{"command":"printf \\u001b]52;c;SECRET\\u0007"}' } });
         reply({}); break;
       case 'splitmessages':
         message(assistant('\x1b]52;c;'));

@@ -342,3 +342,22 @@ test('a task label cannot inject terminal escapes into the conversation heading'
     assert.match(detail, /RED task/, 'the readable text remains');
   } finally { viewer.dispose(); await agents.shutdown(); }
 });
+
+test('the stopped viewer keeps interrupted text that read clips', async () => {
+  const agents = new Agents(() => {});
+  const plainTheme = { fg: (_: string, s: string) => s, bg: (_: string, s: string) => s, bold: (s: string) => s };
+  const id = agents.spawn('long partial', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
+  const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 40 } }, plainTheme, () => {}, process.cwd(), id);
+  const wait = async (fn: () => boolean) => {
+    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    assert.fail('condition not reached');
+  };
+  try {
+    await wait(() => agents.status(id) === 'running');
+    await (agents as any).children.get(id).rpc.request('long');
+    await wait(() => agents.snapshot(id).streaming !== undefined);
+    await agents.stop(id);
+    assert.match(viewer.render(120).join('\n'), /TAIL_MARKER/, 'the viewer shows the full interrupted answer');
+    assert.ok(!agents.read(id).includes('TAIL_MARKER'), 'read keeps its per-item clip');
+  } finally { viewer.dispose(); await agents.shutdown(); }
+});

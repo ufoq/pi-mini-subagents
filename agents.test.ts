@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Agents, childInvocation, transcript } from './agents.ts';
+import { Agents, childInvocation, sanitize, transcript } from './agents.ts';
 import { RpcProcess } from './rpc.ts';
 const invocation = { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() };
 async function until(predicate: () => boolean) {
@@ -79,6 +79,20 @@ test('no five-child cap, no queue, no notices or transcripts on launch/list', as
   assert.equal(notices.length, 0);
 });
 
+test('settled result and error text are sanitized in read', async () => {
+  const { agents, processes } = setup();
+  try {
+    const id = agents.spawn('controls', invocation);
+    await until(() => agents.snapshot(id).status === 'running');
+    await processes[0].request('result');
+    await until(() => agents.snapshot(id).status === 'finished');
+    const text = agents.read(id);
+    assert.match(text, /CLEAN link done/);
+    assert.ok(!text.includes('\x1b'), 'no escape sequences reach the parent');
+    assert.ok(!/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/.test(text), 'no control characters reach the parent');
+  } finally { await agents.shutdown(); }
+});
+
 test('provider failure, process failure, validation and result read bounds', async () => {
   const { agents, processes, notices } = setup();
   try {
@@ -120,6 +134,12 @@ test('streaming deltas are reconstructed, then replaced by authoritative message
   } finally { await agents.shutdown(); }
 });
 
+test('sanitize strips OSC/BEL/ST, CSI and controls without eating visible text', () => {
+  const input = 'a\x1b]8;;https://example\x1b\\link\x1b]8;;\x1b\\ b \x1b[2J\x07c\x00';
+  assert.equal(sanitize(input), 'alink b c');
+  assert.equal(sanitize('plain  text\n\tindented'), 'plain  text\n\tindented');
+});
+
 test('transcript preserves code spacing and strips terminal escapes', () => {
   const snapshot: any = {
     messages: [{ role: 'assistant', content: [{ type: 'text', text: 'go("a  b")\n  indented \x1b[31mX\x1b[0m' }] }],
@@ -151,6 +171,7 @@ test('stopping keeps recent output readable, including a partial answer', async 
     await agents.stop(second);
     assert.match(agents.read(second), /tool bash: done/);
     assert.match(agents.read(second), /SECRET RESULT/);
+    assert.equal(agents.read(second).match(/SECRET RESULT/g)?.length, 1, 'the stopped answer is shown exactly once');
     assert.equal(notices.length, 0, 'stop never emits completion');
   } finally { await agents.shutdown(); }
 });

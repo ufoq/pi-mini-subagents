@@ -13,7 +13,7 @@ name that was actually installed and tested at the time.
 - `./scripts/test rpc.test.ts`
 - `./scripts/test extension.test.ts`
 - `./scripts/test native-rpc.test.ts`
-- `./scripts/test` — **31 passing tests**, deterministic offline suite (includes real Pi processes
+- `./scripts/test` — **34 passing tests**, deterministic offline suite (includes real Pi processes
   against a loopback mock SSE endpoint; no external provider).
 - `node scripts/probe-tui.ts` — actual native TUI in a separate PTY with mock
   provider; successful logs in ignored `tmp/native-probe-UrcNNR/` and a later
@@ -356,7 +356,10 @@ reached the parent. The offline suite asserts that:
 - running `read` labels entries (`assistant:`, `tool bash:`, `user:`);
 - stopping mid-turn keeps the partial assistant text and interrupted tool output
   readable, and stopping twice does not discard it;
-- transcript text preserves code spacing/newlines while stripping terminal escapes;
+- transcript text preserves code spacing/newlines while stripping terminal escapes,
+  including OSC hyperlinks terminated by BEL or ST;
+- cached results and errors are sanitized in `read`;
+- the stopped viewer keeps a long interrupted answer that `read` clips per item;
 - the header shows the resolved model reported by `get_state`
   (`j1 finished · fake-model/fake`);
 - the completion notice still contains no result body, and says settled children

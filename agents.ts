@@ -55,12 +55,13 @@ function bounded(text: string, tail?: string) {
   const note = '\n[truncated; full conversation in /agents]';
   return text.slice(0, Math.max(0, LIMIT - suffix.length - note.length)) + note + suffix;
 }
+const ESCAPES = /(?:\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[P^_][\s\S]*?(?:\x1b\\|\x07)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[()#][0-9A-Za-z]|\x1b[@-_])/g;
 /** Strip terminal escapes/control characters but preserve code spacing and newlines. */
-function sanitize(text: string): string {
+export function sanitize(text: string): string {
   return text
-    .replace(/\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07/g, '')
+    .replace(ESCAPES, '')
     .replace(/\r\n?/g, '\n')
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, ' ');
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, '');
 }
 const clip = (text: string, limit = 500) => {
   const value = sanitize(text);
@@ -168,14 +169,17 @@ export class Agents {
 
   read(id: string): string {
     const c = this.get(id);
-    const header = `${id} ${c.status}${c.model ? ` · ${c.model}` : ''}`;
+    const header = `${id} ${c.status}${c.model ? ` · ${sanitize(c.model)}` : ''}`;
+    const error = c.error ? sanitize(c.error) : '';
+    const result = c.result ? sanitize(c.result) : '';
     if (c.status === 'stopped') {
-      const body = [header, c.error, c.result, transcript(c)].filter(Boolean).join('\n');
-      return bounded(body, 'stopped: transcript retained in memory until parent shutdown');
+      const shown = transcript(c);
+      // The transcript already shows the latest assistant text, so avoid repeating it.
+      const retained = result && !shown.includes(clip(result)) ? result : '';
+      return bounded([header, error, retained, shown].filter(Boolean).join('\n'), 'stopped: transcript retained in memory until parent shutdown');
     }
     if (c.status !== 'running' && c.status !== 'starting') {
-      const body = [header, c.error, c.result].filter(Boolean).join('\n') || `${header}\n(no assistant result)`;
-      return bounded(body, 'retained: transcript in memory; subagent stop releases any live child process');
+      return bounded([header, error, result].filter(Boolean).join('\n'), 'retained: transcript in memory; subagent stop releases any live child process');
     }
     return bounded([header, transcript(c)].filter(Boolean).join('\n'));
   }

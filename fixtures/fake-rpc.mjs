@@ -57,6 +57,13 @@ process.stdin.on('data', chunk => {
         ]) emit({ type: 'message_update', assistantMessageEvent });
         reply({}); break;
       case 'stream_end': message(assistant('FINAL authoritative message')); reply({}); break;
+      case 'long':
+        emit({ type: 'message_start', message: assistant('', { content: [], stopReason: 'pending' }) });
+        emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'A'.repeat(600) + '\nTAIL_MARKER' } });
+        reply({}); break;
+      case 'result':
+        message(assistant('CLEAN \x1b]8;;https://example\x1b\\link\x1b]8;;\x1b\\ \x1b[2J\x07done'));
+        active = false; emit({ type: 'agent_settled', aborted: false }); reply({}); break;
       case 'finish':
         emit({ type: 'tool_execution_end', toolCallId: 't1', toolName: 'bash', result: { content: [{ type: 'text', text: 'done' }] }, isError: false });
         message({ role: 'toolResult', toolCallId: 't1', toolName: 'bash', content: [{ type: 'text', text: 'done' }], isError: false });

@@ -204,7 +204,10 @@ export class AgentViewer {
       if (result) tool.updateResult({ ...result, content: result.content ?? [], isError: result.isError ?? activity.isError ?? false }, activity.running);
       this.content.addChild(tool);
     };
-    for (const message of [...snapshot.messages, ...(snapshot.streaming ? [snapshot.streaming] : [])]) {
+    const interrupted = snapshot.interrupted === undefined ? [] : [{
+      role: 'assistant', content: [{ type: 'text', text: snapshot.interrupted }], timestamp: 0, stopReason: 'aborted',
+    } as unknown as AssistantMessage];
+    for (const message of [...snapshot.messages, ...interrupted, ...(snapshot.streaming ? [snapshot.streaming] : [])]) {
       if (message.role === 'user') this.content.addChild(new UserMessageComponent(messageText(message)));
       else if (message.role === 'assistant') {
         const assistant = new AssistantMessageComponent(message as AssistantMessage, false);

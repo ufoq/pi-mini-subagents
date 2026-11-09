@@ -138,7 +138,6 @@ export function sanitizeMany(texts: string[]): string[] {
   return texts.map(clean);
 }
 const trim = (value: string, limit = 500) => [...value].length <= limit ? value : [...value].slice(0, limit).join('') + '…';
-const clip = (text: string, limit = 500) => trim(sanitize(text), limit);
 function sanitizeValue(value: unknown): unknown {
   if (typeof value === 'string') return sanitize(value);
   if (Array.isArray(value)) return value.map(sanitizeValue);
@@ -341,7 +340,7 @@ export class Agents {
 
   private get(id: string): Child {
     const child = this.children.get(id);
-    if (!child) throw new Error(sanitize(`Unknown subagent ${JSON.stringify(id)}. Use list to find ids.`));
+    if (!child) throw new Error(`Unknown subagent ${JSON.stringify(sanitize(String(id)))}. Use list to find ids.`);
     return child;
   }
   private changed(id: string) {

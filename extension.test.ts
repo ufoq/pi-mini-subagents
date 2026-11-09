@@ -403,6 +403,26 @@ test('a completed tool result already sanitized in messages is not scanned twice
   } finally { viewer.dispose(); await agents.shutdown(); }
 });
 
+test('failed diagnostics in the message and status line keep sanitizer state', async () => {
+  const agents = new Agents(() => {});
+  const plainTheme = { fg: (_: string, s: string) => s, bg: (_: string, s: string) => s, bold: (s: string) => s };
+  const id = agents.spawn('failed split', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
+  const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 40 } }, plainTheme, () => {}, process.cwd(), id);
+  const wait = async (fn: () => boolean) => {
+    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    assert.fail('condition not reached');
+  };
+  try {
+    await wait(() => agents.status(id) === 'running');
+    await (agents as any).children.get(id).rpc.request('failsplit');
+    await wait(() => agents.status(id) === 'failed');
+    const detail = viewer.render(120).join('\n');
+    assert.match(detail, /AFTER/);
+    assert.match(detail, /Error: AFTER/);
+    assert.ok(!detail.includes('SECRET'), 'neither the message renderer nor status line resets control-string state');
+  } finally { viewer.dispose(); await agents.shutdown(); }
+});
+
 test('a partial tool-call preview never shows encoded control payloads', async () => {
   const agents = new Agents(() => {});
   const plainTheme = { fg: (_: string, s: string) => s, bg: (_: string, s: string) => s, bold: (s: string) => s };

@@ -13,7 +13,7 @@ name that was actually installed and tested at the time.
 - `./scripts/test rpc.test.ts`
 - `./scripts/test extension.test.ts`
 - `./scripts/test native-rpc.test.ts`
-- `./scripts/test` — **46 passing tests**, deterministic offline suite (includes real Pi processes
+- `./scripts/test` — **48 passing tests**, deterministic offline suite (includes real Pi processes
   against a loopback mock SSE endpoint; no external provider).
 - `node scripts/probe-tui.ts` — actual native TUI in a separate PTY with mock
   provider; successful logs in ignored `tmp/native-probe-UrcNNR/` and a later
@@ -383,6 +383,8 @@ reached the parent. The offline suite asserts that:
   a second time by the viewer;
 - reused tool ids render as distinct occurrences with their own arguments/results,
   and partial JSON argument previews are omitted rather than shown as encoded payload;
+- failed diagnostics in both the message renderer and status line continue the message
+  sanitizer state, and unknown-id diagnostics sanitize the id before JSON quoting;
 - child RPC errors are sanitized before they reach the parent tool renderer;
 - tool arguments are sanitized before JSON encoding, including image `mimeType` and
   other nested fallback metadata shown by native renderers;

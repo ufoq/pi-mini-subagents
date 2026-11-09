@@ -74,6 +74,11 @@ process.stdin.on('data', chunk => {
         emit({ type: 'tool_execution_start', toolCallId: 'live', toolName: 'bash', args: { command: 'live' } });
         emit({ type: 'tool_execution_update', toolCallId: 'live', toolName: 'bash', partialResult: { content: [{ type: 'text', text: 'LIVE OUTPUT' }] } });
         reply({}); break;
+      case 'failsplit':
+        message(assistant('\x1b]52;c;'));
+        message(assistant('', { stopReason: 'error', errorMessage: 'SECRET\x07AFTER' }));
+        emit({ type: 'agent_settled', aborted: false });
+        reply({}); break;
       case 'settlesplit':
         message(assistant('\x1b]52;c;'));
         message(assistant('SECRET\x07AFTER'));

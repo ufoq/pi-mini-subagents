@@ -216,6 +216,23 @@ test('a control string split across messages stays hidden in read', async () => 
   } finally { await agents.shutdown(); }
 });
 
+test('failed diagnostics keep the message sanitizer state and ids are sanitized before quoting', async () => {
+  const { agents, processes } = setup();
+  try {
+    const id = agents.spawn('failed split', invocation);
+    await until(() => agents.snapshot(id).status === 'running');
+    await processes[0].request('failsplit');
+    await until(() => agents.status(id) === 'failed');
+    const text = agents.read(id);
+    assert.match(text, /AFTER/);
+    assert.ok(!text.includes('SECRET'), 'failed diagnostics continue the sanitizer state');
+    assert.throws(() => agents.read('\x1b]52;c;SECRET\x07'), (error: Error) => {
+      assert.ok(!error.message.includes('SECRET'), 'the unknown id is sanitized before JSON quoting');
+      return true;
+    });
+  } finally { await agents.shutdown(); }
+});
+
 test('settled and stopped results keep the message sanitizer state', async () => {
   const { agents, processes } = setup();
   try {

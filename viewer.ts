@@ -36,8 +36,8 @@ function cleanContent(content: any, cleanText: (text: string) => string): any {
 function cleanMessage(message: any, cleanText: (text: string) => string): any {
   const clean = { ...message };
   if (clean.content !== undefined) clean.content = cleanContent(clean.content, cleanText);
-  if (typeof clean.summary === 'string') clean.summary = sanitize(clean.summary);
-  if (typeof clean.errorMessage === 'string') clean.errorMessage = sanitize(clean.errorMessage);
+  if (typeof clean.summary === 'string') clean.summary = cleanText(clean.summary);
+  if (typeof clean.errorMessage === 'string') clean.errorMessage = cleanText(clean.errorMessage);
   if (typeof clean.toolName === 'string') clean.toolName = sanitize(clean.toolName);
   if (clean.details !== undefined) clean.details = cleanValue(clean.details);
   return clean;
@@ -68,6 +68,7 @@ export class AgentViewer {
   private snapshotCache?: { id: string; value: Snapshot };
   private unsubscribe: () => void;
   private status = '';
+  private diagnostic = '';
   private definitions: Record<string, ToolRenderers>;
   private _focused = false;
 
@@ -228,7 +229,7 @@ export class AgentViewer {
       fit(this.theme.bold(this.theme.fg('accent', `${snapshot.id} ${snapshot.status} — ${plain(snapshot.task)}`))),
       ...lines.slice(this.scroll.scrollTop, this.scroll.scrollTop + viewport).map(fit),
       ...(showHint ? [fit(this.hint(width, ['PgUp/PgDn scroll · Ctrl+Y live · Ctrl+X stop · Esc list', 'PgUp/PgDn · Ctrl+Y · Ctrl+X · Esc', 'Ctrl+X stop · Esc']))] : []),
-      ...(showStatus ? [fit(this.statusLine(mode, snapshot.error, width))] : []),
+      ...(showStatus ? [fit(this.statusLine(mode, this.diagnostic, width))] : []),
       ...composer,
     ];
   }
@@ -237,7 +238,14 @@ export class AgentViewer {
     this.content.clear();
     const shownActivities = new Set<ToolActivity>();
     const cleanText = createSanitizer();
-    const messages = snapshot.messages.map(message => cleanMessage(message, cleanText));
+    let lastError = '';
+    let lastErrorRaw = '';
+    const messages = snapshot.messages.map(message => {
+      const clean = cleanMessage(message, cleanText);
+      if (typeof message.errorMessage === 'string') { lastErrorRaw = message.errorMessage; lastError = clean.errorMessage ?? ''; }
+      return clean;
+    });
+    this.diagnostic = snapshot.error ? (snapshot.error === lastErrorRaw ? lastError : cleanText(snapshot.error)) : '';
     const streaming = snapshot.streaming ? cleanMessage(snapshot.streaming, cleanText) : undefined;
     const resultsById = new Map<string, any[]>();
     for (const message of messages) {

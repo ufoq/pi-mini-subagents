@@ -73,6 +73,20 @@ process.stdin.on('data', chunk => {
         emit({ type: 'tool_execution_start', toolCallId: 'live', toolName: 'bash', args: { command: 'live' } });
         emit({ type: 'tool_execution_update', toolCallId: 'live', toolName: 'bash', partialResult: { content: [{ type: 'text', text: 'LIVE OUTPUT' }] } });
         reply({}); break;
+      case 'splitmessages':
+        message(assistant('\x1b]52;c;'));
+        message(assistant('SECRET\x07AFTER'));
+        reply({}); break;
+      case 'interruptsplit':
+        message(assistant('\x1b]52;c;'));
+        emit({ type: 'message_start', message: assistant('', { content: [], stopReason: 'pending' }) });
+        emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'SECRET\x07AFTER' } });
+        reply({}); break;
+      case 'resultmessage':
+        emit({ type: 'tool_execution_start', toolCallId: 'r1', toolName: 'bash', args: { command: 'result' } });
+        emit({ type: 'tool_execution_end', toolCallId: 'r1', toolName: 'bash', result: { content: [{ type: 'text', text: 'VISIBLE' }] }, isError: false });
+        message({ role: 'toolResult', toolCallId: 'r1', toolName: 'bash', content: [{ type: 'text', text: 'VISIBLE\x1b]52;c;' }], isError: false });
+        reply({}); break;
       case 'parallel':
         emit({ type: 'tool_execution_start', toolCallId: 'p1', toolName: 'bash', args: { command: 'fast' } });
         emit({ type: 'tool_execution_end', toolCallId: 'p1', toolName: 'bash', result: { content: [{ type: 'text', text: 'fast output' }] }, isError: false });

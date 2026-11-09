@@ -158,6 +158,8 @@ test('sanitize strips OSC/BEL/ST, CSI and controls without eating visible text',
   assert.equal(sanitize('a\x9b12\x9cVISIBLE'), 'aVISIBLE');
   assert.deepEqual(sanitizeMany(['\x1b]52;c;', 'SECRET\x07AFTER']), ['', 'AFTER']);
   assert.deepEqual(sanitizeMany(['\x1bPq', 'SECRET\x1b\\AFTER']), ['', 'AFTER']);
+  assert.deepEqual(sanitizeMany(['\x1b', ']52;c;SECRET\x07AFTER']), ['', 'AFTER']);
+  assert.deepEqual(sanitizeMany(['\x1bPqSECRET\x1b', '\\AFTER']), ['', 'AFTER']);
   assert.equal(sanitize('a\x90dcs\x1b\\VISIBLE'), 'aVISIBLE');
 });
 
@@ -194,6 +196,33 @@ test('live activity survives many completed parallel siblings in a bounded read'
     const text = agents.read(id);
     assert.match(text, /tool bash \(running\): .*LIVE OUTPUT/);
     assert.ok(text.length <= 8000, 'the read stays bounded');
+  } finally { await agents.shutdown(); }
+});
+
+test('a control string split across messages stays hidden in read', async () => {
+  const { agents, processes } = setup();
+  try {
+    const id = agents.spawn('split messages', invocation);
+    await until(() => agents.snapshot(id).status === 'running');
+    await processes[0].request('splitmessages');
+    await until(() => agents.snapshot(id).messages.length >= 2);
+    const text = agents.read(id);
+    assert.match(text, /AFTER/);
+    assert.ok(!text.includes('SECRET'), 'the split OSC payload is not exposed');
+  } finally { await agents.shutdown(); }
+});
+
+test('a stopped child keeps split interrupted text sanitized', async () => {
+  const { agents, processes } = setup();
+  try {
+    const id = agents.spawn('interrupted split', invocation);
+    await until(() => agents.snapshot(id).status === 'running');
+    await processes[0].request('interruptsplit');
+    await until(() => agents.snapshot(id).streaming !== undefined);
+    await agents.stop(id);
+    const text = agents.read(id);
+    assert.match(text, /AFTER/);
+    assert.ok(!text.includes('SECRET'), 'interrupted output carries the preceding sanitizer state');
   } finally { await agents.shutdown(); }
 });
 

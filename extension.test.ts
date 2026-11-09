@@ -365,6 +365,65 @@ test('the stopped viewer keeps interrupted text that read clips', async () => {
   } finally { viewer.dispose(); await agents.shutdown(); }
 });
 
+test('the stopped viewer carries sanitizer state into interrupted output', async () => {
+  const agents = new Agents(() => {});
+  const plainTheme = { fg: (_: string, s: string) => s, bg: (_: string, s: string) => s, bold: (s: string) => s };
+  const id = agents.spawn('interrupted split', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
+  const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 40 } }, plainTheme, () => {}, process.cwd(), id);
+  const wait = async (fn: () => boolean) => {
+    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    assert.fail('condition not reached');
+  };
+  try {
+    await wait(() => agents.status(id) === 'running');
+    await (agents as any).children.get(id).rpc.request('interruptsplit');
+    await wait(() => agents.snapshot(id).streaming !== undefined);
+    await agents.stop(id);
+    const detail = viewer.render(120).join('\n');
+    assert.match(detail, /AFTER/);
+    assert.ok(!detail.includes('SECRET'), 'interrupted output does not reset control-string state');
+  } finally { viewer.dispose(); await agents.shutdown(); }
+});
+
+test('a completed tool result already sanitized in messages is not scanned twice', async () => {
+  const agents = new Agents(() => {});
+  const plainTheme = { fg: (_: string, s: string) => s, bg: (_: string, s: string) => s, bold: (s: string) => s };
+  const id = agents.spawn('result message', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
+  const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 40 } }, plainTheme, () => {}, process.cwd(), id);
+  const wait = async (fn: () => boolean) => {
+    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    assert.fail('condition not reached');
+  };
+  try {
+    await wait(() => agents.status(id) === 'running');
+    await (agents as any).children.get(id).rpc.request('resultmessage');
+    await wait(() => agents.snapshot(id).messages.some(m => m.role === 'toolResult'));
+    const detail = viewer.render(120).join('\n');
+    assert.match(detail, /VISIBLE/, 'the authoritative result is rendered without a second stateful pass');
+  } finally { viewer.dispose(); await agents.shutdown(); }
+});
+
+test('the viewer shows a reused tool id as a new occurrence', async () => {
+  const agents = new Agents(() => {});
+  const plainTheme = { fg: (_: string, s: string) => s, bg: (_: string, s: string) => s, bold: (s: string) => s };
+  const id = agents.spawn('reuse tool id', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
+  const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 40 } }, plainTheme, () => {}, process.cwd(), id);
+  const wait = async (fn: () => boolean) => {
+    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    assert.fail('condition not reached');
+  };
+  try {
+    await wait(() => agents.status(id) === 'running');
+    await (agents as any).children.get(id).rpc.request('finish');
+    await (agents as any).children.get(id).rpc.request('settle');
+    await wait(() => agents.status(id) === 'finished');
+    await agents.send(id, 'again');
+    await wait(() => agents.snapshot(id).tools.t1?.running === true);
+    const detail = viewer.render(120).join('\n');
+    assert.match(detail, /live output/, 'the new running occurrence is visible');
+  } finally { viewer.dispose(); await agents.shutdown(); }
+});
+
 test('viewer sanitizes child text, arguments and results before rendering', async () => {
   const agents = new Agents(() => {});
   const plainTheme = { fg: (_: string, s: string) => s, bg: (_: string, s: string) => s, bold: (s: string) => s };

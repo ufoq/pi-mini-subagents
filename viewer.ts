@@ -235,14 +235,14 @@ export class AgentViewer {
 
   private rebuild(snapshot: Snapshot) {
     this.content.clear();
-    const shownTools = new Set<string>();
+    const shownTools = new Set<ToolActivity>();
     const cleanText = createSanitizer();
     const messages = snapshot.messages.map(message => cleanMessage(message, cleanText));
     const streaming = snapshot.streaming ? cleanMessage(snapshot.streaming, cleanText) : undefined;
     const results = new Map(messages.filter(m => m.role === 'toolResult').map(m => [m.toolCallId, m]));
     const showTool = (activity: ToolActivity) => {
-      if (shownTools.has(activity.id)) return;
-      shownTools.add(activity.id);
+      if (shownTools.has(activity)) return;
+      shownTools.add(activity);
       const name = sanitize(String(activity.name));
       const tool = new ToolExecutionComponent(name, activity.id, cleanValue(activity.args), { showImages: false }, this.definitions[activity.name] ?? this.definitions[name], this.tui, this.cwd);
       // Observer snapshots do not own execution clocks. Marking execution started
@@ -250,12 +250,13 @@ export class AgentViewer {
       // The edit renderer rereads the file on args-complete, outside our sanitization.
       if (activity.name !== 'edit' && name !== 'edit') tool.setArgsComplete();
       tool.setExpanded(true);
-      const result = cleanResult(results.get(activity.id) ?? activity.result, cleanText);
+      const fromMessages = activity.reported ? results.get(activity.id) : undefined;
+      const result = fromMessages ?? (activity.result ? cleanResult(activity.result, cleanText) : undefined);
       if (result) tool.updateResult({ ...result, content: result.content ?? [], isError: result.isError ?? activity.isError ?? false }, activity.running);
       this.content.addChild(tool);
     };
     const interrupted = snapshot.interrupted === undefined ? [] : [{
-      role: 'assistant', content: [{ type: 'text', text: sanitize(snapshot.interrupted) }], timestamp: 0, stopReason: 'aborted',
+      role: 'assistant', content: [{ type: 'text', text: cleanText(snapshot.interrupted) }], timestamp: 0, stopReason: 'aborted',
     } as unknown as AssistantMessage];
     for (const message of [...messages, ...interrupted, ...(streaming ? [streaming] : [])]) {
       if (message.role === 'user') this.content.addChild(new UserMessageComponent(messageText(message)));

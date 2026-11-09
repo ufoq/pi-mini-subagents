@@ -57,8 +57,10 @@ function c1Introducer(code: number) {
 function cancelled(code: number) {
   return code === 0x18 || code === 0x1a; // CAN / SUB
 }
-type ScanState = null | { kind: 'csi' } | { kind: 'string'; bel: boolean };
+type ScanState = null | { kind: 'esc' } | { kind: 'csi' } | { kind: 'string'; bel: boolean; pendingEsc?: boolean };
 function scan(text: string, initial: ScanState): { text: string; state: ScanState } {
+  if (initial?.kind === 'esc') { text = '\x1b' + text; initial = null; }
+  else if (initial?.kind === 'string' && initial.pendingEsc) { text = '\x1b' + text; initial = { kind: 'string', bel: initial.bel }; }
   let out = '';
   let state = initial;
   let i = 0;
@@ -66,7 +68,11 @@ function scan(text: string, initial: ScanState): { text: string; state: ScanStat
     const code = text.charCodeAt(i);
     if (state?.kind === 'csi') {
       if (cancelled(code) || code === 0x9c) { state = null; i++; continue; }
-      if (code === 0x1b || c1Introducer(code)) { state = null; continue; }
+      if (code === 0x1b) {
+        if (i + 1 >= text.length) { state = { kind: 'esc' }; i++; continue; }
+        state = null; continue;
+      }
+      if (c1Introducer(code)) { state = null; continue; }
       if (code >= 0x40 && code <= 0x7e) { state = null; i++; continue; }
       i++; continue;
     }
@@ -75,6 +81,7 @@ function scan(text: string, initial: ScanState): { text: string; state: ScanStat
       if (cancelled(code)) { state = null; i++; continue; }
       if (code === 0x1b) {
         if (text.charCodeAt(i + 1) === 0x5c) { state = null; i += 2; continue; }
+        if (i + 1 >= text.length) { state = { kind: 'string', bel: state.bel, pendingEsc: true }; i++; continue; }
         state = null; continue;
       }
       if (c1Introducer(code)) { state = null; continue; }
@@ -90,7 +97,7 @@ function scan(text: string, initial: ScanState): { text: string; state: ScanStat
         if (c === 0x7f || c < 0x20) { j++; continue; }
         break;
       }
-      if (j >= text.length) { i = j; break; }
+      if (j >= text.length) { state = { kind: 'esc' }; i = j; break; }
       const next = text.charCodeAt(j);
       if (next === 0x1b || c1Introducer(next)) { i = j; continue; }
       if (next === 0x5d) { state = { kind: 'string', bel: true }; i = j + 1; continue; }
@@ -130,10 +137,8 @@ export function sanitizeMany(texts: string[]): string[] {
   const clean = createSanitizer();
   return texts.map(clean);
 }
-const clip = (text: string, limit = 500) => {
-  const value = sanitize(text);
-  return [...value].length <= limit ? value : [...value].slice(0, limit).join('') + '…';
-};
+const trim = (value: string, limit = 500) => [...value].length <= limit ? value : [...value].slice(0, limit).join('') + '…';
+const clip = (text: string, limit = 500) => trim(sanitize(text), limit);
 function sanitizeValue(value: unknown): unknown {
   if (typeof value === 'string') return sanitize(value);
   if (Array.isArray(value)) return value.map(sanitizeValue);
@@ -148,32 +153,36 @@ export function transcript(c: Snapshot): string {
   const live: string[] = [];
   const recentLines: string[] = [];
   const completed: string[] = [];
-  const recent = c.messages.slice(-8);
-  for (const m of recent) {
+  const clean = createSanitizer();
+  const recentStart = Math.max(0, c.messages.length - 8);
+  for (let index = 0; index < c.messages.length; index++) {
+    const m = c.messages[index];
+    const text = clean(messageText(m));
+    if (index < recentStart) continue;
     if (m.role === 'toolResult') {
-      recentLines.push(`tool ${sanitize(String(m.toolName ?? '?'))}${m.isError ? ' (error)' : ''}: ${clip(messageText(m))}`);
+      recentLines.push(`tool ${sanitize(String(m.toolName ?? '?'))}${m.isError ? ' (error)' : ''}: ${trim(text)}`);
     } else if (m.role === 'assistant') {
       const calls = (m.content ?? []).filter((x: RecordData) => x.type === 'toolCall').map((x: RecordData) => sanitize(String(x.name ?? '?')));
-      const text = messageText(m);
-      recentLines.push(`assistant: ${clip(text || '(no text)')}${calls.length ? ` [called ${calls.join(', ')}]` : ''}`);
+      recentLines.push(`assistant: ${trim(text || '(no text)')}${calls.length ? ` [called ${calls.join(', ')}]` : ''}`);
     } else if (m.role === 'user') {
-      recentLines.push(`user: ${clip(messageText(m))}`);
+      recentLines.push(`user: ${trim(text)}`);
     } else {
-      recentLines.push(`${sanitize(String(m.role ?? 'message'))}: ${clip(messageText(m))}`);
+      recentLines.push(`${sanitize(String(m.role ?? 'message'))}: ${trim(text)}`);
     }
   }
-  if (c.streaming) live.push(`assistant (streaming): ${clip(messageText(c.streaming))}`);
-  if (c.interrupted) live.push(`assistant (interrupted): ${clip(c.interrupted)}`);
+  if (c.streaming) live.push(`assistant (streaming): ${trim(clean(messageText(c.streaming)))}`);
+  if (c.interrupted) live.push(`assistant (interrupted): ${trim(clean(c.interrupted))}`);
   for (const tool of Object.values(c.tools)) {
     if (tool.reported) continue;
     const name = sanitize(String(tool.name));
+    const result = tool.result ? trim(clean(messageText(tool.result))) : '';
     if (tool.running) {
-      live.push(`tool ${name} (running): ${clip(argsText(tool.args))}${tool.result ? ` → ${clip(messageText(tool.result))}` : ''}`);
+      live.push(`tool ${name} (running): ${trim(argsText(tool.args))}${result ? ` → ${result}` : ''}`);
     } else if (tool.interrupted) {
-      live.push(`tool ${name} (interrupted): ${clip(argsText(tool.args))}${tool.result ? ` → ${clip(messageText(tool.result))}` : ''}`);
-    } else if (tool.result) {
+      live.push(`tool ${name} (interrupted): ${trim(argsText(tool.args))}${result ? ` → ${result}` : ''}`);
+    } else if (result) {
       // Parallel batches can finish a tool before Pi emits its toolResult message.
-      completed.push(`tool ${name}: ${clip(messageText(tool.result))}`);
+      completed.push(`tool ${name}: ${result}`);
     }
   }
   return sanitize([...live, ...recentLines, ...completed].join('\n'));

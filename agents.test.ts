@@ -145,6 +145,11 @@ test('sanitize strips OSC/BEL/ST, CSI and controls without eating visible text',
   assert.equal(sanitize('a\x1b]8;;u\x9cLINK\x1b]8;;\x9cz'), 'aLINKz');
   assert.equal(sanitize('a\x1bPdcs\x9cVISIBLE'), 'aVISIBLE');
   assert.equal(sanitize('a\x1b[\x1b]52;c;SECRET\x07z'), 'az');
+  assert.equal(sanitize('a\x1b[12\x18VISIBLE'), 'aVISIBLE');
+  assert.equal(sanitize('a\x1b]0;x\x18VISIBLE'), 'aVISIBLE');
+  assert.equal(sanitize('a\x1b_x\x1aVISIBLE'), 'aVISIBLE');
+  assert.equal(sanitize('a\x1b\x1b]52;c;SECRET\x07z'), 'az');
+  assert.equal(sanitize('a\x1b(\x1b]52;c;SECRET\x07z'), 'az');
   assert.equal(sanitize('a\x90dcs\x1b\\VISIBLE'), 'aVISIBLE');
 });
 

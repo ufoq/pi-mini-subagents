@@ -7,7 +7,7 @@ import { RpcProcess } from './rpc.ts';
 const { default: register, completionNotification, parseModel, listReply, startingReply } = await load.import('../index.ts');
 const { AgentViewer } = await load.import('../viewer.ts');
 const { visibleWidth, CURSOR_MARKER } = await load.import('@earendil-works/pi-tui');
-const { initTheme } = await load.import('@earendil-works/pi-coding-agent');
+const { initTheme, ToolExecutionComponent } = await load.import('@earendil-works/pi-coding-agent');
 // initTheme is public and initializes the native renderers, just as Pi does.
 initTheme('dark');
 
@@ -369,7 +369,7 @@ test('viewer sanitizes child text, arguments and results before rendering', asyn
   const agents = new Agents(() => {});
   const plainTheme = { fg: (_: string, s: string) => s, bg: (_: string, s: string) => s, bold: (s: string) => s };
   const id = agents.spawn('inject', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
-  const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 24 } }, plainTheme, () => {}, process.cwd(), id);
+  const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 60 } }, plainTheme, () => {}, process.cwd(), id);
   const wait = async (fn: () => boolean) => {
     for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
     assert.fail('condition not reached');
@@ -379,11 +379,21 @@ test('viewer sanitizes child text, arguments and results before rendering', asyn
     await wait(() => agents.status(id) === 'running');
     await (agents as any).children.get(id).rpc.request('inject');
     await wait(() => !!agents.snapshot(id).tools.i1?.result);
+    await wait(() => !!agents.snapshot(id).tools.i2?.result);
+    await new Promise(r => setTimeout(r, 100)); // let any disk-backed preview finish
+    const proto = ToolExecutionComponent.prototype;
+    const original = proto.setArgsComplete;
+    const completed: string[] = [];
+    proto.setArgsComplete = function () { completed.push((this as any).toolName); return original.call(this); };
+    let detail: string;
+    try { detail = viewer.render(100).join('\n'); } finally { proto.setArgsComplete = original; }
+    assert.ok(!completed.includes('edit'), 'the edit renderer never receives an args-complete signal');
     viewer.status = '\x1b[2Jbad status';
-    const detail = viewer.render(100).join('\n');
+    detail = viewer.render(100).join('\n');
     assert.match(detail, /INJECTED/);
     assert.match(detail, /PAYLOAD/);
     assert.match(detail, /EDIT_PAYLOAD/, 'diff details reach the native renderer');
+    assert.match(detail, /image\/pngIMAGE_PAYLOAD/, 'the image fallback is rendered from sanitized metadata');
     assert.ok(!detail.includes('\x1b[2J'), 'CSI is stripped from child text and status');
     assert.ok(!detail.includes('\x1b]52'), 'OSC is stripped from tool arguments');
     assert.ok(!detail.includes('\x9b'), '8-bit CSI is stripped from tool results');

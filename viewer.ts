@@ -14,18 +14,9 @@ function cleanValue(value: any): any {
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [sanitize(key), cleanValue(item)]));
   return value;
 }
-function cleanPart(part: any): any {
-  if (!part || typeof part !== 'object') return part;
-  const clean = { ...part };
-  if (typeof part.text === 'string') clean.text = sanitize(part.text);
-  if (typeof part.thinking === 'string') clean.thinking = sanitize(part.thinking);
-  if (part.type === 'toolCall') { clean.name = sanitize(String(part.name ?? '')); clean.arguments = cleanValue(part.arguments); }
-  return clean;
-}
 function cleanMessage(message: any): any {
   const clean = { ...message };
-  if (typeof clean.content === 'string') clean.content = sanitize(clean.content);
-  else if (Array.isArray(clean.content)) clean.content = clean.content.map(cleanPart);
+  if (clean.content !== undefined) clean.content = cleanValue(clean.content);
   if (typeof clean.summary === 'string') clean.summary = sanitize(clean.summary);
   if (typeof clean.errorMessage === 'string') clean.errorMessage = sanitize(clean.errorMessage);
   if (typeof clean.toolName === 'string') clean.toolName = sanitize(clean.toolName);
@@ -34,9 +25,7 @@ function cleanMessage(message: any): any {
 }
 function cleanResult(result: any): any {
   if (!result) return result;
-  const clean = cleanValue(result);
-  clean.content = Array.isArray(result.content) ? result.content.map(cleanPart) : result.content;
-  return clean;
+  return cleanValue(result);
 }
 
 /** Uses public Pi renderers; child text is sanitized before any renderer sees it. */

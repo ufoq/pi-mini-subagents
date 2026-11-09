@@ -51,18 +51,27 @@ function bounded(text: string, tail?: string) {
   const note = '\n[truncated; full conversation in /agents]';
   return text.slice(0, Math.max(0, LIMIT - suffix.length - note.length)) + note + suffix;
 }
+function c1Introducer(code: number) {
+  return code === 0x9b || code === 0x9d || code === 0x90 || code === 0x98 || code === 0x9e || code === 0x9f;
+}
+function cancelled(code: number) {
+  return code === 0x18 || code === 0x1a; // CAN / SUB
+}
 function skipString(text: string, start: number) {
   for (let i = start; i < text.length; i++) {
     const code = text.charCodeAt(i);
     if (code === 0x07 || code === 0x9c) return i;
-    if (code === 0x1b && text.charCodeAt(i + 1) === 0x5c) return i + 1;
+    if (cancelled(code)) return i;
+    if (code === 0x1b) return text.charCodeAt(i + 1) === 0x5c ? i + 1 : i - 1;
+    if (c1Introducer(code)) return i - 1;
   }
   return text.length;
 }
 function skipCsi(text: string, start: number) {
   for (let i = start; i < text.length; i++) {
     const code = text.charCodeAt(i);
-    if (code === 0x1b || code === 0x9b || code === 0x9d || code === 0x90 || code === 0x98 || code === 0x9e || code === 0x9f) return i - 1;
+    if (cancelled(code)) return i;
+    if (code === 0x1b || c1Introducer(code)) return i - 1;
     if (code >= 0x40 && code <= 0x7e) return i;
   }
   return text.length;
@@ -74,11 +83,14 @@ export function sanitize(text: string): string {
     const code = text.charCodeAt(i);
     if (code === 0x1b) {
       const next = text.charCodeAt(i + 1);
+      if (next === 0x1b || c1Introducer(next)) continue;         // fresh introducer: reprocess it
       if (next === 0x5d) i = skipString(text, i + 2);            // OSC
       else if (next === 0x5b) i = skipCsi(text, i + 2);           // CSI
       else if (next === 0x50 || next === 0x58 || next === 0x5e || next === 0x5f) i = skipString(text, i + 2); // DCS/SOS/PM/APC
-      else if (next === 0x28 || next === 0x29 || next === 0x23) i += 2; // charset
-      else i += 1;                                              // two-byte escape
+      else if (next === 0x28 || next === 0x29 || next === 0x23) { // charset
+        const following = text.charCodeAt(i + 2);
+        i += following === 0x1b || c1Introducer(following) ? 1 : 2;
+      } else i += 1;                                              // two-byte escape
       continue;
     }
     if (code === 0x9d) { i = skipString(text, i + 1); continue; } // C1 OSC

@@ -366,8 +366,10 @@ reached the parent. The offline suite asserts that:
   `details.diff` before native renderers see them, without stripping renderer styling;
 - the edit renderer never receives an args-complete signal, so it cannot reread a
   file and render unsanitized preview content behind the sanitizer;
-- cancelled CSI sequences restart at the new introducer instead of consuming an OSC
-  payload, and tool arguments are sanitized before JSON encoding;
+- cancelled CSI/OSC/APC sequences and fresh ESC introducers restart parsing without
+  swallowing following text or exposing a payload; CAN/SUB cancel control strings;
+- tool arguments are sanitized before JSON encoding, including image `mimeType` and
+  other nested fallback metadata shown by native renderers;
 - live/interrupted activity is ordered before recent history and completed siblings,
   so it survives the read bound even with many completed parallel tools;
 - a completed parallel tool is visible before Pi emits its `toolResult` message and

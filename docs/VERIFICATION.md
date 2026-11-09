@@ -13,7 +13,7 @@ name that was actually installed and tested at the time.
 - `./scripts/test rpc.test.ts`
 - `./scripts/test extension.test.ts`
 - `./scripts/test native-rpc.test.ts`
-- `./scripts/test` — **38 passing tests**, deterministic offline suite (includes real Pi processes
+- `./scripts/test` — **39 passing tests**, deterministic offline suite (includes real Pi processes
   against a loopback mock SSE endpoint; no external provider).
 - `node scripts/probe-tui.ts` — actual native TUI in a separate PTY with mock
   provider; successful logs in ignored `tmp/native-probe-UrcNNR/` and a later
@@ -368,6 +368,9 @@ reached the parent. The offline suite asserts that:
   file and render unsanitized preview content behind the sanitizer;
 - cancelled CSI/OSC/APC sequences and fresh ESC introducers restart parsing without
   swallowing following text or exposing a payload; CAN/SUB cancel control strings;
+- BEL terminates OSC only, while DCS/APC strings stay hidden until ST, so an embedded
+  BEL cannot expose their payload;
+- child RPC errors are sanitized before they reach the parent tool renderer;
 - tool arguments are sanitized before JSON encoding, including image `mimeType` and
   other nested fallback metadata shown by native renderers;
 - live/interrupted activity is ordered before recent history and completed siblings,

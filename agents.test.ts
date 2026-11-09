@@ -150,6 +150,8 @@ test('sanitize strips OSC/BEL/ST, CSI and controls without eating visible text',
   assert.equal(sanitize('a\x1b_x\x1aVISIBLE'), 'aVISIBLE');
   assert.equal(sanitize('a\x1b\x1b]52;c;SECRET\x07z'), 'az');
   assert.equal(sanitize('a\x1b(\x1b]52;c;SECRET\x07z'), 'az');
+  assert.equal(sanitize('before\x1bPqDATA\x07SECRET\x1b\\after'), 'beforeafter');
+  assert.equal(sanitize('before\x90DATA\x07SECRET\x9cafter'), 'beforeafter');
   assert.equal(sanitize('a\x90dcs\x1b\\VISIBLE'), 'aVISIBLE');
 });
 
@@ -186,6 +188,20 @@ test('live activity survives many completed parallel siblings in a bounded read'
     const text = agents.read(id);
     assert.match(text, /tool bash \(running\): .*LIVE OUTPUT/);
     assert.ok(text.length <= 8000, 'the read stays bounded');
+  } finally { await agents.shutdown(); }
+});
+
+test('a rejected send sanitizes the child RPC error', async () => {
+  const { agents } = setup();
+  try {
+    const id = agents.spawn('reject me', invocation);
+    await until(() => agents.snapshot(id).status === 'running');
+    await assert.rejects(agents.send(id, 'reject-inject'), (error: Error) => {
+      assert.ok(!error.message.includes('SECRET'), 'the OSC payload is not exposed');
+      assert.ok(!error.message.includes('\x9d'), 'the C1 introducer is removed');
+      return true;
+    });
+    assert.equal(agents.status(id), 'running', 'a rejected input does not fail the child');
   } finally { await agents.shutdown(); }
 });
 

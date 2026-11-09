@@ -26,6 +26,7 @@ process.stdin.on('data', chunk => {
       case 'get_last_assistant_text': reply({ text: messages.findLast(m => m.role === 'assistant')?.content[0].text }); break;
       case 'prompt':
         if (c.message === 'reject') { emit({ type: 'response', id: c.id, command: c.type, success: false, error: 'prompt rejected' }); break; }
+        if (c.message === 'reject-inject') { emit({ type: 'response', id: c.id, command: c.type, success: false, error: 'bad \x9d52;c;SECRET\x9c' }); break; }
         if (active && c.streamingBehavior !== 'steer') throw new Error('must steer');
         reply({ disposition: active ? 'queued' : 'started' });
         message({ role: 'user', content: c.message, timestamp: Date.now() });

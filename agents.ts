@@ -57,10 +57,10 @@ function c1Introducer(code: number) {
 function cancelled(code: number) {
   return code === 0x18 || code === 0x1a; // CAN / SUB
 }
-function skipString(text: string, start: number) {
+function skipString(text: string, start: number, belTerminates: boolean) {
   for (let i = start; i < text.length; i++) {
     const code = text.charCodeAt(i);
-    if (code === 0x07 || code === 0x9c) return i;
+    if ((belTerminates && code === 0x07) || code === 0x9c) return i;
     if (cancelled(code)) return i;
     if (code === 0x1b) return text.charCodeAt(i + 1) === 0x5c ? i + 1 : i - 1;
     if (c1Introducer(code)) return i - 1;
@@ -84,18 +84,18 @@ export function sanitize(text: string): string {
     if (code === 0x1b) {
       const next = text.charCodeAt(i + 1);
       if (next === 0x1b || c1Introducer(next)) continue;         // fresh introducer: reprocess it
-      if (next === 0x5d) i = skipString(text, i + 2);            // OSC
+      if (next === 0x5d) i = skipString(text, i + 2, true);      // OSC
       else if (next === 0x5b) i = skipCsi(text, i + 2);           // CSI
-      else if (next === 0x50 || next === 0x58 || next === 0x5e || next === 0x5f) i = skipString(text, i + 2); // DCS/SOS/PM/APC
+      else if (next === 0x50 || next === 0x58 || next === 0x5e || next === 0x5f) i = skipString(text, i + 2, false); // DCS/SOS/PM/APC
       else if (next === 0x28 || next === 0x29 || next === 0x23) { // charset
         const following = text.charCodeAt(i + 2);
         i += following === 0x1b || c1Introducer(following) ? 1 : 2;
       } else i += 1;                                              // two-byte escape
       continue;
     }
-    if (code === 0x9d) { i = skipString(text, i + 1); continue; } // C1 OSC
+    if (code === 0x9d) { i = skipString(text, i + 1, true); continue; } // C1 OSC
     if (code === 0x9b) { i = skipCsi(text, i + 1); continue; }     // C1 CSI
-    if (code === 0x90 || code === 0x98 || code === 0x9e || code === 0x9f) { i = skipString(text, i + 1); continue; }
+    if (code === 0x90 || code === 0x98 || code === 0x9e || code === 0x9f) { i = skipString(text, i + 1, false); continue; }
     if (code === 0x0a) { out += '\n'; continue; }
     if (code === 0x09) { out += '\t'; continue; }
     if (code === 0x0d) { if (text.charCodeAt(i + 1) === 0x0a) i++; out += '\n'; continue; }
@@ -185,7 +185,7 @@ export class Agents {
     } catch (error) {
       // e.g. invalid argv: never retain a child that owns no process.
       this.children.delete(id);
-      throw new Error(`Could not start ${id}: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(sanitize(`Could not start ${id}: ${error instanceof Error ? error.message : String(error)}`));
     }
     // Launch succeeded: publish everything a synchronous factory callback queued.
     child.held = false;
@@ -261,7 +261,7 @@ export class Agents {
       // A rejected input is not proof that the already-running child failed.
       // Transport failures report themselves through onFailure instead.
       if (c.status === 'running') { Object.assign(c, previous); this.changed(id); }
-      throw error;
+      throw new Error(sanitize(error instanceof Error ? error.message : String(error)));
     }
   }
 
@@ -273,7 +273,8 @@ export class Agents {
     c.streaming = undefined;
     interruptTools(c, 'Stopped before tool completed.');
     this.changed(id);
-    await c.rpc.stop();
+    try { await c.rpc.stop(); }
+    catch (error) { throw new Error(sanitize(error instanceof Error ? error.message : String(error))); }
   }
 
   async shutdown(): Promise<void> {
@@ -289,7 +290,7 @@ export class Agents {
 
   private get(id: string): Child {
     const child = this.children.get(id);
-    if (!child) throw new Error(`Unknown subagent ${JSON.stringify(id)}. Use list to find ids.`);
+    if (!child) throw new Error(sanitize(`Unknown subagent ${JSON.stringify(id)}. Use list to find ids.`));
     return child;
   }
   private changed(id: string) {

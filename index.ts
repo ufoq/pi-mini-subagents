@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { StringEnum } from '@earendil-works/pi-ai';
 import { Type } from 'typebox';
-import { Agents, childInvocation, type Status } from './agents.ts';
+import { Agents, childInvocation, sanitize, type Status } from './agents.ts';
 
 export function completionNotification(id: string, status: Status) {
   return `<system-notification>\nSubagent ${id} ${status}. Result/diagnostic available; use subagent read when needed. Settled children stay in memory; subagent stop releases any live child process.\n</system-notification>`;
@@ -53,24 +53,28 @@ export default function (pi: ExtensionAPI) {
       model: Type.Optional(Type.String({ description: '"provider/model" for this child; defaults to the parent model.' })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const a = registry();
-      let text: string;
-      if (params.action === 'spawn') {
-        const model = parseModel(params.model) ?? ctx.model;
-        const id = a.spawn(params.message ?? '', childInvocation(ctx.cwd, model ?? undefined, ctx.thinkingLevel));
-        text = startingReply(id, model);
-      } else if (params.action === 'list') {
-        text = listReply(a.list());
-      } else {
-        if (!params.id) throw new Error(`id is required for ${params.action}.`);
-        switch (params.action) {
-          case 'read': text = a.read(params.id); break;
-          case 'send': await a.send(params.id, params.message ?? ''); text = `${params.id}: input accepted in the same conversation.`; break;
-          case 'stop': await a.stop(params.id); text = `${params.id} stopped.`; break;
-          default: throw new Error('Unknown subagent action.');
+      try {
+        const a = registry();
+        let text: string;
+        if (params.action === 'spawn') {
+          const model = parseModel(params.model) ?? ctx.model;
+          const id = a.spawn(params.message ?? '', childInvocation(ctx.cwd, model ?? undefined, ctx.thinkingLevel));
+          text = startingReply(id, model);
+        } else if (params.action === 'list') {
+          text = listReply(a.list());
+        } else {
+          if (!params.id) throw new Error(`id is required for ${params.action}.`);
+          switch (params.action) {
+            case 'read': text = a.read(params.id); break;
+            case 'send': await a.send(params.id, params.message ?? ''); text = `${params.id}: input accepted in the same conversation.`; break;
+            case 'stop': await a.stop(params.id); text = `${params.id} stopped.`; break;
+            default: throw new Error('Unknown subagent action.');
+          }
         }
+        return { content: [{ type: 'text', text }], details: undefined };
+      } catch (error) {
+        throw new Error(sanitize(error instanceof Error ? error.message : String(error)));
       }
-      return { content: [{ type: 'text', text }], details: undefined };
     },
   });
 

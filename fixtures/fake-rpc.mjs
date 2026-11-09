@@ -57,6 +57,17 @@ process.stdin.on('data', chunk => {
         ]) emit({ type: 'message_update', assistantMessageEvent });
         reply({}); break;
       case 'stream_end': message(assistant('FINAL authoritative message')); reply({}); break;
+      case 'inject':
+        message(assistant('\x1b[2JINJECTED'));
+        emit({ type: 'tool_execution_start', toolCallId: 'i1', toolName: 'bash\x1b[2J', args: { command: 'printf \x1b]52;c;SECRET\x07' } });
+        emit({ type: 'tool_execution_update', toolCallId: 'i1', toolName: 'bash', partialResult: { content: [{ type: 'text', text: '\x9b2JPAYLOAD' }] } });
+        reply({}); break;
+      case 'parallel':
+        emit({ type: 'tool_execution_start', toolCallId: 'p1', toolName: 'bash', args: { command: 'fast' } });
+        emit({ type: 'tool_execution_end', toolCallId: 'p1', toolName: 'bash', result: { content: [{ type: 'text', text: 'fast output' }] }, isError: false });
+        emit({ type: 'tool_execution_start', toolCallId: 'p2', toolName: 'bash', args: { command: 'slow' } });
+        emit({ type: 'tool_execution_update', toolCallId: 'p2', toolName: 'bash', partialResult: { content: [{ type: 'text', text: 'slow output' }] } });
+        reply({}); break;
       case 'long':
         emit({ type: 'message_start', message: assistant('', { content: [], stopReason: 'pending' }) });
         emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'A'.repeat(600) + '\nTAIL_MARKER' } });

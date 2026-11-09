@@ -37,11 +37,7 @@ export function messageText(message?: RecordData): string {
 }
 /** One line with no terminal escapes or control characters. */
 export function plain(text: string): string {
-  return text
-    .replace(/\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07/g, '')
-    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return sanitize(text).replace(/\s+/g, ' ').trim();
 }
 /** A plain label, additionally bounded to 100 code points for model replies. */
 export function label(text: string): string {
@@ -55,7 +51,7 @@ function bounded(text: string, tail?: string) {
   const note = '\n[truncated; full conversation in /agents]';
   return text.slice(0, Math.max(0, LIMIT - suffix.length - note.length)) + note + suffix;
 }
-const ESCAPES = /(?:\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[P^_][\s\S]*?(?:\x1b\\|\x07)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[()#][0-9A-Za-z]|\x1b[@-_])/g;
+const ESCAPES = /(?:\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x9d[^\x07\x9c]*(?:\x07|\x9c)|\x1b[P^_][\s\S]*?(?:\x1b\\|\x07)|[\x90\x98\x9e\x9f][\s\S]*?\x9c|\x1b\[[0-?]*[ -/]*[@-~]|\x9b[0-?]*[ -/]*[@-~]|\x1b[()#][0-9A-Za-z]|\x1b[@-_]|\x9c)/g;
 /** Strip terminal escapes/control characters but preserve code spacing and newlines. */
 export function sanitize(text: string): string {
   return text
@@ -70,24 +66,34 @@ const clip = (text: string, limit = 500) => {
 /** One attributed line per message/tool call, so `read` does not dump an unlabelled wall. */
 export function transcript(c: Snapshot): string {
   const lines: string[] = [];
-  for (const m of c.messages.slice(-8)) {
+  const recent = c.messages.slice(-8);
+  const shown = new Set(recent.filter(m => m.role === 'toolResult').map(m => m.toolCallId));
+  for (const m of recent) {
     if (m.role === 'toolResult') {
-      lines.push(`tool ${m.toolName ?? '?'}${m.isError ? ' (error)' : ''}: ${clip(messageText(m))}`);
+      lines.push(`tool ${sanitize(String(m.toolName ?? '?'))}${m.isError ? ' (error)' : ''}: ${clip(messageText(m))}`);
     } else if (m.role === 'assistant') {
-      const calls = (m.content ?? []).filter((x: RecordData) => x.type === 'toolCall').map((x: RecordData) => x.name);
+      const calls = (m.content ?? []).filter((x: RecordData) => x.type === 'toolCall').map((x: RecordData) => sanitize(String(x.name ?? '?')));
       const text = messageText(m);
       lines.push(`assistant: ${clip(text || '(no text)')}${calls.length ? ` [called ${calls.join(', ')}]` : ''}`);
     } else if (m.role === 'user') {
       lines.push(`user: ${clip(messageText(m))}`);
     } else {
-      lines.push(`${m.role ?? 'message'}: ${clip(messageText(m))}`);
+      lines.push(`${sanitize(String(m.role ?? 'message'))}: ${clip(messageText(m))}`);
     }
   }
   if (c.streaming) lines.push(`assistant (streaming): ${clip(messageText(c.streaming))}`);
   if (c.interrupted) lines.push(`assistant (interrupted): ${clip(c.interrupted)}`);
   for (const tool of Object.values(c.tools)) {
-    if (tool.running) lines.push(`tool ${tool.name} (running): ${clip(JSON.stringify(tool.args))}${tool.result ? ` → ${clip(messageText(tool.result))}` : ''}`);
-    else if (tool.interrupted) lines.push(`tool ${tool.name} (interrupted): ${clip(JSON.stringify(tool.args))}${tool.result ? ` → ${clip(messageText(tool.result))}` : ''}`);
+    if (shown.has(tool.id)) continue;
+    const name = sanitize(String(tool.name));
+    if (tool.running) {
+      lines.push(`tool ${name} (running): ${clip(JSON.stringify(tool.args))}${tool.result ? ` → ${clip(messageText(tool.result))}` : ''}`);
+    } else if (tool.interrupted) {
+      lines.push(`tool ${name} (interrupted): ${clip(JSON.stringify(tool.args))}${tool.result ? ` → ${clip(messageText(tool.result))}` : ''}`);
+    } else if (tool.result) {
+      // Parallel batches can finish a tool before Pi emits its toolResult message.
+      lines.push(`tool ${name}: ${clip(messageText(tool.result))}`);
+    }
   }
   return lines.filter(Boolean).join('\n');
 }

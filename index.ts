@@ -7,6 +7,10 @@ export function completionNotification(id: string, status: Status) {
   return `<system-notification>\nSubagent ${id} ${status}. Result/diagnostic available; use subagent read when needed. Settled children stay in memory; subagent stop releases any live child process.\n</system-notification>`;
 }
 
+export function startingReply(id: string, model?: { provider: string; id: string }) {
+  return `${id} starting${model ? ` on ${model.provider}/${model.id}` : ''}. Parent may continue; completion will notify. Results require read.`;
+}
+
 export function listReply(rows: { id: string; status: Status; task: string }[]) {
   const lines = rows.map(c => `${c.id} ${c.status}: ${c.task}`);
   if (rows.some(c => c.status === 'finished' || c.status === 'failed')) {
@@ -54,7 +58,7 @@ export default function (pi: ExtensionAPI) {
       if (params.action === 'spawn') {
         const model = parseModel(params.model) ?? ctx.model;
         const id = a.spawn(params.message ?? '', childInvocation(ctx.cwd, model ?? undefined, ctx.thinkingLevel));
-        text = `${id} starting${model ? ` on ${model.provider}/${model.id}` : ''}. Parent may continue; completion will notify. Results require read.`;
+        text = startingReply(id, model);
       } else if (params.action === 'list') {
         text = listReply(a.list());
       } else {

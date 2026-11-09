@@ -13,7 +13,7 @@ name that was actually installed and tested at the time.
 - `./scripts/test rpc.test.ts`
 - `./scripts/test extension.test.ts`
 - `./scripts/test native-rpc.test.ts`
-- `./scripts/test` — **34 passing tests**, deterministic offline suite (includes real Pi processes
+- `./scripts/test` — **36 passing tests**, deterministic offline suite (includes real Pi processes
   against a loopback mock SSE endpoint; no external provider).
 - `node scripts/probe-tui.ts` — actual native TUI in a separate PTY with mock
   provider; successful logs in ignored `tmp/native-probe-UrcNNR/` and a later
@@ -358,8 +358,14 @@ reached the parent. The offline suite asserts that:
   readable, and stopping twice does not discard it;
 - transcript text preserves code spacing/newlines while stripping terminal escapes,
   including OSC hyperlinks terminated by BEL or ST;
-- cached results and errors are sanitized in `read`;
+- cached results, errors and tool names are sanitized in `read`;
+- C1 OSC/DCS/CSI forms are stripped, and labels/headings use the same sanitizer;
 - the stopped viewer keeps a long interrupted answer that `read` clips per item;
+- the viewer sanitizes child text, status, tool arguments and results before native
+  renderers see them, without stripping renderer-generated styling;
+- a completed parallel tool is visible before Pi emits its `toolResult` message and
+  remains visible after stop, exactly once;
+- `spawn` replies handle an absent parent model and echo requested aliases verbatim.
 - the header shows the resolved model reported by `get_state`
   (`j1 finished · fake-model/fake`);
 - the completion notice still contains no result body, and says settled children

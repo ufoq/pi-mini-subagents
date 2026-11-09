@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { load } from './fixtures/pi-loader.ts';
 import { Agents } from './agents.ts';
 import { RpcProcess } from './rpc.ts';
-const { default: register, completionNotification, parseModel, listReply } = await load.import('../index.ts');
+const { default: register, completionNotification, parseModel, listReply, startingReply } = await load.import('../index.ts');
 const { AgentViewer } = await load.import('../viewer.ts');
 const { visibleWidth, CURSOR_MARKER } = await load.import('@earendil-works/pi-tui');
 const { initTheme } = await load.import('@earendil-works/pi-coding-agent');
@@ -37,6 +37,8 @@ test('one compact tool, actionable validation, exact completion-only delivery an
   assert.match(content, /^<system-notification>\nSubagent j1 failed\./);
   assert.match(content, /subagent stop releases any live child process/);
   assert.ok(!content.includes('SECRET RESULT'));
+  assert.equal(startingReply('j1'), 'j1 starting. Parent may continue; completion will notify. Results require read.');
+  assert.match(startingReply('j1', { provider: 'mock', id: 'alias/model' }), /starting on mock\/alias\/model/);
   assert.match(listReply([{ id: 'j1', status: 'finished', task: 'review' }]), /subagent stop releases any live child process/);
   assert.ok(!listReply([{ id: 'j1', status: 'running', task: 'review' }]).includes('subagent stop'));
   assert.equal(listReply([]), 'No subagents.');
@@ -359,5 +361,30 @@ test('the stopped viewer keeps interrupted text that read clips', async () => {
     await agents.stop(id);
     assert.match(viewer.render(120).join('\n'), /TAIL_MARKER/, 'the viewer shows the full interrupted answer');
     assert.ok(!agents.read(id).includes('TAIL_MARKER'), 'read keeps its per-item clip');
+  } finally { viewer.dispose(); await agents.shutdown(); }
+});
+
+test('viewer sanitizes child text, arguments and results before rendering', async () => {
+  const agents = new Agents(() => {});
+  const plainTheme = { fg: (_: string, s: string) => s, bg: (_: string, s: string) => s, bold: (s: string) => s };
+  const id = agents.spawn('inject', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
+  const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 24 } }, plainTheme, () => {}, process.cwd(), id);
+  const wait = async (fn: () => boolean) => {
+    for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); }
+    assert.fail('condition not reached');
+  };
+  try {
+    await wait(() => agents.status(id) === 'running');
+    await (agents as any).children.get(id).rpc.request('inject');
+    await wait(() => !!agents.snapshot(id).tools.i1?.result);
+    viewer.status = '\x1b[2Jbad status';
+    const detail = viewer.render(100).join('\n');
+    assert.match(detail, /INJECTED/);
+    assert.match(detail, /PAYLOAD/);
+    assert.ok(!detail.includes('\x1b[2J'), 'CSI is stripped from child text and status');
+    assert.ok(!detail.includes('\x1b]52'), 'OSC is stripped from tool arguments');
+    assert.ok(!detail.includes('\x9b'), '8-bit CSI is stripped from tool results');
+    assert.ok(!detail.includes('52;c;SECRET'), 'OSC payload does not leak as visible text');
+    assert.ok(!agents.read(id).includes('\x1b'), 'tool names are sanitized in read too');
   } finally { viewer.dispose(); await agents.shutdown(); }
 });

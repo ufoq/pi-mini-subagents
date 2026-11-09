@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Agents, childInvocation, sanitize, transcript } from './agents.ts';
+import { Agents, childInvocation, label, plain, sanitize, transcript } from './agents.ts';
 import { RpcProcess } from './rpc.ts';
 const invocation = { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() };
 async function until(predicate: () => boolean) {
@@ -138,6 +138,9 @@ test('sanitize strips OSC/BEL/ST, CSI and controls without eating visible text',
   const input = 'a\x1b]8;;https://example\x1b\\link\x1b]8;;\x1b\\ b \x1b[2J\x07c\x00';
   assert.equal(sanitize(input), 'alink b c');
   assert.equal(sanitize('plain  text\n\tindented'), 'plain  text\n\tindented');
+  assert.equal(sanitize('a\x9d0;payload\x9c b\x9b2Jc\x90dcs\x9cd'), 'a bcd');
+  assert.equal(plain('a\x1b]8;;https://example\x1b\\link\x1b]8;;\x1b\\ b'), 'alink b');
+  assert.equal(label('\x9d0;payload\x9cvisible'), 'visible');
 });
 
 test('transcript preserves code spacing and strips terminal escapes', () => {
@@ -146,6 +149,23 @@ test('transcript preserves code spacing and strips terminal escapes', () => {
     tools: {},
   };
   assert.match(transcript(snapshot), /go\("a  b"\)\n  indented X/);
+});
+
+test('a completed parallel tool stays readable before its toolResult arrives', async () => {
+  const { agents, processes } = setup();
+  try {
+    const id = agents.spawn('parallel tools', invocation);
+    await until(() => agents.snapshot(id).status === 'running');
+    await processes[0].request('parallel');
+    await until(() => !!agents.snapshot(id).tools.p1?.result && !!agents.snapshot(id).tools.p2?.result);
+    assert.match(agents.read(id), /tool bash: fast output/, 'finished sibling is visible without a toolResult message');
+    assert.match(agents.read(id), /tool bash \(running\): .*slow output/);
+    await agents.stop(id);
+    const stopped = agents.read(id);
+    assert.match(stopped, /tool bash: fast output/, 'finished sibling survives stop');
+    assert.match(stopped, /tool bash \(interrupted\): .*slow output/);
+    assert.equal(stopped.match(/fast output/g)?.length, 1, 'no duplicate completed output');
+  } finally { await agents.shutdown(); }
 });
 
 test('stopping keeps recent output readable, including a partial answer', async () => {

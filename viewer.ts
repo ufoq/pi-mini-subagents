@@ -6,9 +6,37 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { Container, Input, Text, ScrollView, matchesKey, Key, truncateToWidth, visibleWidth, type TUI } from '@earendil-works/pi-tui';
-import { plain, Agents, messageText, type Snapshot, type ToolActivity } from './agents.ts';
+import { plain, sanitize, Agents, messageText, type Snapshot, type ToolActivity } from './agents.ts';
 
-/** Uses public Pi renderers; no child transcript enters parent context. */
+function cleanValue(value: any): any {
+  if (typeof value === 'string') return sanitize(value);
+  if (Array.isArray(value)) return value.map(cleanValue);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, cleanValue(item)]));
+  return value;
+}
+function cleanPart(part: any): any {
+  if (!part || typeof part !== 'object') return part;
+  const clean = { ...part };
+  if (typeof part.text === 'string') clean.text = sanitize(part.text);
+  if (typeof part.thinking === 'string') clean.thinking = sanitize(part.thinking);
+  if (part.type === 'toolCall') { clean.name = sanitize(String(part.name ?? '')); clean.arguments = cleanValue(part.arguments); }
+  return clean;
+}
+function cleanMessage(message: any): any {
+  const clean = { ...message };
+  if (typeof clean.content === 'string') clean.content = sanitize(clean.content);
+  else if (Array.isArray(clean.content)) clean.content = clean.content.map(cleanPart);
+  if (typeof clean.summary === 'string') clean.summary = sanitize(clean.summary);
+  if (typeof clean.errorMessage === 'string') clean.errorMessage = sanitize(clean.errorMessage);
+  if (typeof clean.toolName === 'string') clean.toolName = sanitize(clean.toolName);
+  return clean;
+}
+function cleanResult(result: any): any {
+  if (!result) return result;
+  return { ...result, content: Array.isArray(result.content) ? result.content.map(cleanPart) : result.content };
+}
+
+/** Uses public Pi renderers; child text is sanitized before any renderer sees it. */
 export class AgentViewer {
   private agents: Agents;
   private tui: TUI;
@@ -63,7 +91,7 @@ export class AgentViewer {
    * intent shrinks to one word so the error stays readable.
    */
   private statusLine(mode: Mode, error: string | undefined, width: number) {
-    const detail = [error, this.status].filter(Boolean).join(' · ');
+    const detail = [error ? sanitize(error) : '', sanitize(this.status)].filter(Boolean).join(' · ');
     const intent = !detail || visibleWidth(intentOf(mode)) + 3 + 6 <= width ? intentOf(mode) : shortIntentOf(mode);
     return [intent, detail].filter(Boolean).join(' · ');
   }
@@ -192,34 +220,37 @@ export class AgentViewer {
   private rebuild(snapshot: Snapshot) {
     this.content.clear();
     const shownTools = new Set<string>();
-    const results = new Map(snapshot.messages.filter(m => m.role === 'toolResult').map(m => [m.toolCallId, m]));
+    const messages = snapshot.messages.map(cleanMessage);
+    const streaming = snapshot.streaming ? cleanMessage(snapshot.streaming) : undefined;
+    const results = new Map(messages.filter(m => m.role === 'toolResult').map(m => [m.toolCallId, m]));
     const showTool = (activity: ToolActivity) => {
       if (shownTools.has(activity.id)) return;
       shownTools.add(activity.id);
-      const tool = new ToolExecutionComponent(activity.name, activity.id, activity.args, { showImages: false }, this.definitions[activity.name], this.tui, this.cwd);
+      const name = sanitize(String(activity.name));
+      const tool = new ToolExecutionComponent(name, activity.id, cleanValue(activity.args), { showImages: false }, this.definitions[activity.name] ?? this.definitions[name], this.tui, this.cwd);
       // Observer snapshots do not own execution clocks. Marking execution started
       // would start native renderer timers with no public disposal hook on close.
       tool.setArgsComplete(); tool.setExpanded(true);
-      const result = results.get(activity.id) ?? activity.result;
+      const result = cleanResult(results.get(activity.id) ?? activity.result);
       if (result) tool.updateResult({ ...result, content: result.content ?? [], isError: result.isError ?? activity.isError ?? false }, activity.running);
       this.content.addChild(tool);
     };
     const interrupted = snapshot.interrupted === undefined ? [] : [{
-      role: 'assistant', content: [{ type: 'text', text: snapshot.interrupted }], timestamp: 0, stopReason: 'aborted',
+      role: 'assistant', content: [{ type: 'text', text: sanitize(snapshot.interrupted) }], timestamp: 0, stopReason: 'aborted',
     } as unknown as AssistantMessage];
-    for (const message of [...snapshot.messages, ...interrupted, ...(snapshot.streaming ? [snapshot.streaming] : [])]) {
+    for (const message of [...messages, ...interrupted, ...(streaming ? [streaming] : [])]) {
       if (message.role === 'user') this.content.addChild(new UserMessageComponent(messageText(message)));
       else if (message.role === 'assistant') {
         const assistant = new AssistantMessageComponent(message as AssistantMessage, false);
-        if (message === snapshot.streaming) assistant.updateContent(message as AssistantMessage, true);
+        if (message === streaming) assistant.updateContent(message as AssistantMessage, true);
         this.content.addChild(assistant);
         for (const call of message.content ?? []) {
           if (call.type !== 'toolCall') continue;
-          if (call.partialArguments) this.content.addChild(new Text(`${call.name} ${call.partialArguments}`, 0, 0));
+          if (call.partialArguments) this.content.addChild(new Text(`${sanitize(String(call.name))} ${sanitize(String(call.partialArguments))}`, 0, 0));
           else showTool(snapshot.tools[call.id] ?? { id: call.id, name: call.name, args: call.arguments, running: !results.has(call.id) });
         }
       } else if (message.role !== 'toolResult' && message.role !== 'system') {
-        this.content.addChild(new Text(messageText(message) || message.summary || `[${message.role}]`, 0, 0));
+        this.content.addChild(new Text(messageText(message) || message.summary || `[${sanitize(String(message.role))}]`, 0, 0));
       }
     }
     // Executions can start before a finalized assistant/tool-result message.

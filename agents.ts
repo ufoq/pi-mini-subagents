@@ -4,7 +4,7 @@ import { RpcProcess, type Invocation, type RecordData } from './rpc.ts';
 
 export type Status = 'starting' | 'running' | 'finished' | 'failed' | 'stopped';
 export interface ToolActivity {
-  id: string; name: string; args: RecordData; result?: RecordData; running: boolean; isError?: boolean; interrupted?: boolean;
+  id: string; name: string; args: RecordData; result?: RecordData; running: boolean; isError?: boolean; interrupted?: boolean; reported?: boolean;
 }
 export interface Snapshot {
   id: string; task: string; status: Status; sessionId?: string; model?: string;
@@ -57,52 +57,78 @@ function c1Introducer(code: number) {
 function cancelled(code: number) {
   return code === 0x18 || code === 0x1a; // CAN / SUB
 }
-function skipString(text: string, start: number, belTerminates: boolean) {
-  for (let i = start; i < text.length; i++) {
-    const code = text.charCodeAt(i);
-    if ((belTerminates && code === 0x07) || code === 0x9c) return i;
-    if (cancelled(code)) return i;
-    if (code === 0x1b) return text.charCodeAt(i + 1) === 0x5c ? i + 1 : i - 1;
-    if (c1Introducer(code)) return i - 1;
-  }
-  return text.length;
-}
-function skipCsi(text: string, start: number) {
-  for (let i = start; i < text.length; i++) {
-    const code = text.charCodeAt(i);
-    if (cancelled(code)) return i;
-    if (code === 0x1b || c1Introducer(code)) return i - 1;
-    if (code >= 0x40 && code <= 0x7e) return i;
-  }
-  return text.length;
-}
-/** Strip terminal escapes/control characters but preserve code spacing and newlines. */
-export function sanitize(text: string): string {
+type ScanState = null | { kind: 'csi' } | { kind: 'string'; bel: boolean };
+function scan(text: string, initial: ScanState): { text: string; state: ScanState } {
   let out = '';
-  for (let i = 0; i < text.length; i++) {
+  let state = initial;
+  let i = 0;
+  while (i < text.length) {
     const code = text.charCodeAt(i);
+    if (state?.kind === 'csi') {
+      if (cancelled(code) || code === 0x9c) { state = null; i++; continue; }
+      if (code === 0x1b || c1Introducer(code)) { state = null; continue; }
+      if (code >= 0x40 && code <= 0x7e) { state = null; i++; continue; }
+      i++; continue;
+    }
+    if (state?.kind === 'string') {
+      if (code === 0x9c) { state = null; i++; continue; }
+      if (cancelled(code)) { state = null; i++; continue; }
+      if (code === 0x1b) {
+        if (text.charCodeAt(i + 1) === 0x5c) { state = null; i += 2; continue; }
+        state = null; continue;
+      }
+      if (c1Introducer(code)) { state = null; continue; }
+      if (state.bel && code === 0x07) { state = null; i++; continue; }
+      i++; continue;
+    }
     if (code === 0x1b) {
-      const next = text.charCodeAt(i + 1);
-      if (next === 0x1b || c1Introducer(next)) continue;         // fresh introducer: reprocess it
-      if (next === 0x5d) i = skipString(text, i + 2, true);      // OSC
-      else if (next === 0x5b) i = skipCsi(text, i + 2);           // CSI
-      else if (next === 0x50 || next === 0x58 || next === 0x5e || next === 0x5f) i = skipString(text, i + 2, false); // DCS/SOS/PM/APC
-      else if (next === 0x28 || next === 0x29 || next === 0x23) { // charset
-        const following = text.charCodeAt(i + 2);
-        i += following === 0x1b || c1Introducer(following) ? 1 : 2;
-      } else i += 1;                                              // two-byte escape
+      // NUL and other C0 controls do not end an escape sequence.
+      let j = i + 1;
+      while (j < text.length) {
+        const c = text.charCodeAt(j);
+        if (c === 0x1b || c1Introducer(c) || cancelled(c)) break;
+        if (c === 0x7f || c < 0x20) { j++; continue; }
+        break;
+      }
+      if (j >= text.length) { i = j; break; }
+      const next = text.charCodeAt(j);
+      if (next === 0x1b || c1Introducer(next)) { i = j; continue; }
+      if (next === 0x5d) { state = { kind: 'string', bel: true }; i = j + 1; continue; }
+      if (next === 0x5b) { state = { kind: 'csi' }; i = j + 1; continue; }
+      if (next === 0x50 || next === 0x58 || next === 0x5e || next === 0x5f) { state = { kind: 'string', bel: false }; i = j + 1; continue; }
+      if (next === 0x28 || next === 0x29 || next === 0x23) {
+        const following = text.charCodeAt(j + 1);
+        i = following === 0x1b || c1Introducer(following) ? j + 1 : j + 2;
+        continue;
+      }
+      i = j + 1;
       continue;
     }
-    if (code === 0x9d) { i = skipString(text, i + 1, true); continue; } // C1 OSC
-    if (code === 0x9b) { i = skipCsi(text, i + 1); continue; }     // C1 CSI
-    if (code === 0x90 || code === 0x98 || code === 0x9e || code === 0x9f) { i = skipString(text, i + 1, false); continue; }
-    if (code === 0x0a) { out += '\n'; continue; }
-    if (code === 0x09) { out += '\t'; continue; }
-    if (code === 0x0d) { if (text.charCodeAt(i + 1) === 0x0a) i++; out += '\n'; continue; }
-    if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) continue;
-    out += text[i];
+    if (c1Introducer(code)) {
+      if (code === 0x9d) state = { kind: 'string', bel: true };
+      else if (code === 0x9b) state = { kind: 'csi' };
+      else state = { kind: 'string', bel: false };
+      i++; continue;
+    }
+    if (code === 0x0a) { out += '\n'; i++; continue; }
+    if (code === 0x09) { out += '\t'; i++; continue; }
+    if (code === 0x0d) { if (text.charCodeAt(i + 1) === 0x0a) i++; out += '\n'; i++; continue; }
+    if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) { i++; continue; }
+    out += text[i]; i++;
   }
-  return out;
+  return { text: out, state };
+}
+/** Strip terminal escapes/control characters but preserve code spacing and newlines. */
+export function sanitize(text: string): string { return scan(text, null).text; }
+/** Stateful sanitizer for a composed display stream; split control strings stay hidden. */
+export function createSanitizer() {
+  let state: ScanState = null;
+  return (text: string) => { const result = scan(text, state); state = result.state; return result.text; };
+}
+/** Sanitize a sequence of text blocks as one stream, so a control string split across blocks stays hidden. */
+export function sanitizeMany(texts: string[]): string[] {
+  const clean = createSanitizer();
+  return texts.map(clean);
 }
 const clip = (text: string, limit = 500) => {
   const value = sanitize(text);
@@ -123,7 +149,6 @@ export function transcript(c: Snapshot): string {
   const recentLines: string[] = [];
   const completed: string[] = [];
   const recent = c.messages.slice(-8);
-  const shown = new Set(c.messages.filter(m => m.role === 'toolResult').map(m => m.toolCallId));
   for (const m of recent) {
     if (m.role === 'toolResult') {
       recentLines.push(`tool ${sanitize(String(m.toolName ?? '?'))}${m.isError ? ' (error)' : ''}: ${clip(messageText(m))}`);
@@ -140,7 +165,7 @@ export function transcript(c: Snapshot): string {
   if (c.streaming) live.push(`assistant (streaming): ${clip(messageText(c.streaming))}`);
   if (c.interrupted) live.push(`assistant (interrupted): ${clip(c.interrupted)}`);
   for (const tool of Object.values(c.tools)) {
-    if (shown.has(tool.id)) continue;
+    if (tool.reported) continue;
     const name = sanitize(String(tool.name));
     if (tool.running) {
       live.push(`tool ${name} (running): ${clip(argsText(tool.args))}${tool.result ? ` → ${clip(messageText(tool.result))}` : ''}`);
@@ -151,7 +176,7 @@ export function transcript(c: Snapshot): string {
       completed.push(`tool ${name}: ${clip(messageText(tool.result))}`);
     }
   }
-  return [...live, ...recentLines, ...completed].join('\n');
+  return sanitize([...live, ...recentLines, ...completed].join('\n'));
 }
 function requireMessage(message: string) {
   if (typeof message !== 'string' || !message.trim()) throw new Error('A non-empty message is required.');
@@ -336,6 +361,10 @@ export class Agents {
       case 'message_end':
         c.messages.push(e.message);
         if (e.message.role === 'assistant') c.streaming = undefined;
+        if (e.message.role === 'toolResult') {
+          const tool = c.tools[e.message.toolCallId];
+          if (tool && !tool.running) tool.reported = true;
+        }
         break;
       case 'tool_execution_start':
         c.tools[e.toolCallId] = { id: e.toolCallId, name: e.toolName, args: e.args ?? {}, running: true };

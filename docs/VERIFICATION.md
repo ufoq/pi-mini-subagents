@@ -369,7 +369,11 @@ reached the parent. The offline suite asserts that:
 - cancelled CSI/OSC/APC sequences and fresh ESC introducers restart parsing without
   swallowing following text or exposing a payload; CAN/SUB cancel control strings;
 - BEL terminates OSC only, while DCS/APC strings stay hidden until ST, so an embedded
-  BEL cannot expose their payload;
+  BEL cannot expose their payload; NUL does not end an escape, and C1 ST cancels CSI;
+- the sanitizer carries control-string state across composed text blocks and messages,
+  so an OSC/DCS split between blocks stays hidden in both `read` and viewer output;
+- completed tool activities are deduplicated per occurrence (`reported`), so a reused
+  tool-call id in a follow-up remains visible while it runs;
 - child RPC errors are sanitized before they reach the parent tool renderer;
 - tool arguments are sanitized before JSON encoding, including image `mimeType` and
   other nested fallback metadata shown by native renderers;

@@ -6,7 +6,7 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { Container, Input, Text, ScrollView, matchesKey, Key, truncateToWidth, visibleWidth, type TUI } from '@earendil-works/pi-tui';
-import { plain, sanitize, Agents, messageText, type Snapshot, type ToolActivity } from './agents.ts';
+import { plain, sanitize, createSanitizer, Agents, messageText, type Snapshot, type ToolActivity } from './agents.ts';
 
 function cleanValue(value: any): any {
   if (typeof value === 'string') return sanitize(value);
@@ -14,18 +14,42 @@ function cleanValue(value: any): any {
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [sanitize(key), cleanValue(item)]));
   return value;
 }
-function cleanMessage(message: any): any {
+function cleanContent(content: any, cleanText: (text: string) => string): any {
+  if (typeof content === 'string') return cleanText(content);
+  if (!Array.isArray(content)) return cleanValue(content);
+  const copies = content.map(part => part && typeof part === 'object' ? { ...part } : part);
+  const slots: Array<{ part: any; key: string }> = [];
+  for (const part of copies) {
+    if (!part || typeof part !== 'object') continue;
+    for (const key of ['text', 'thinking']) if (typeof part[key] === 'string') slots.push({ part, key });
+  }
+  for (const slot of slots) slot.part[slot.key] = cleanText(slot.part[slot.key]);
+  return copies.map(part => {
+    if (!part || typeof part !== 'object') return part;
+    const clean = { ...part };
+    for (const [key, value] of Object.entries(part)) {
+      if (key !== 'text' && key !== 'thinking') clean[key] = cleanValue(value);
+    }
+    return clean;
+  });
+}
+function cleanMessage(message: any, cleanText: (text: string) => string): any {
   const clean = { ...message };
-  if (clean.content !== undefined) clean.content = cleanValue(clean.content);
+  if (clean.content !== undefined) clean.content = cleanContent(clean.content, cleanText);
   if (typeof clean.summary === 'string') clean.summary = sanitize(clean.summary);
   if (typeof clean.errorMessage === 'string') clean.errorMessage = sanitize(clean.errorMessage);
   if (typeof clean.toolName === 'string') clean.toolName = sanitize(clean.toolName);
   if (clean.details !== undefined) clean.details = cleanValue(clean.details);
   return clean;
 }
-function cleanResult(result: any): any {
+function cleanResult(result: any, cleanText: (text: string) => string): any {
   if (!result) return result;
-  return cleanValue(result);
+  const clean = { ...result };
+  if (clean.content !== undefined) clean.content = cleanContent(clean.content, cleanText);
+  for (const [key, value] of Object.entries(result)) {
+    if (key !== 'content') clean[key] = cleanValue(value);
+  }
+  return clean;
 }
 
 /** Uses public Pi renderers; child text is sanitized before any renderer sees it. */
@@ -212,8 +236,9 @@ export class AgentViewer {
   private rebuild(snapshot: Snapshot) {
     this.content.clear();
     const shownTools = new Set<string>();
-    const messages = snapshot.messages.map(cleanMessage);
-    const streaming = snapshot.streaming ? cleanMessage(snapshot.streaming) : undefined;
+    const cleanText = createSanitizer();
+    const messages = snapshot.messages.map(message => cleanMessage(message, cleanText));
+    const streaming = snapshot.streaming ? cleanMessage(snapshot.streaming, cleanText) : undefined;
     const results = new Map(messages.filter(m => m.role === 'toolResult').map(m => [m.toolCallId, m]));
     const showTool = (activity: ToolActivity) => {
       if (shownTools.has(activity.id)) return;
@@ -225,7 +250,7 @@ export class AgentViewer {
       // The edit renderer rereads the file on args-complete, outside our sanitization.
       if (activity.name !== 'edit' && name !== 'edit') tool.setArgsComplete();
       tool.setExpanded(true);
-      const result = cleanResult(results.get(activity.id) ?? activity.result);
+      const result = cleanResult(results.get(activity.id) ?? activity.result, cleanText);
       if (result) tool.updateResult({ ...result, content: result.content ?? [], isError: result.isError ?? activity.isError ?? false }, activity.running);
       this.content.addChild(tool);
     };

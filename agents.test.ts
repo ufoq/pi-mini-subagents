@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Agents, childInvocation, label, plain, sanitize, transcript } from './agents.ts';
+import { Agents, childInvocation, label, plain, sanitize, sanitizeMany, transcript } from './agents.ts';
 import { RpcProcess } from './rpc.ts';
 const invocation = { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() };
 async function until(predicate: () => boolean) {
@@ -55,6 +55,8 @@ test('launch is immediate; late snapshot, live activity, steering and persistent
     unsubscribe();
     const previousUpdates = updates;
     await agents.send(id, 'follow-up with context');
+    await until(() => agents.snapshot(id).tools.t1?.running === true);
+    assert.match(agents.read(id), /tool bash \(running\): .*live output/, 'a reused tool id starts a new occurrence');
     await processes[0].request('finish'); await processes[0].request('settle');
     assert.equal(processes.length, 1, 'same process');
     assert.equal(updates, previousUpdates, 'closing observer unsubscribes, not stops');
@@ -152,6 +154,10 @@ test('sanitize strips OSC/BEL/ST, CSI and controls without eating visible text',
   assert.equal(sanitize('a\x1b(\x1b]52;c;SECRET\x07z'), 'az');
   assert.equal(sanitize('before\x1bPqDATA\x07SECRET\x1b\\after'), 'beforeafter');
   assert.equal(sanitize('before\x90DATA\x07SECRET\x9cafter'), 'beforeafter');
+  assert.equal(sanitize('a\x1b\x00]52;c;SECRET\x07z'), 'az');
+  assert.equal(sanitize('a\x9b12\x9cVISIBLE'), 'aVISIBLE');
+  assert.deepEqual(sanitizeMany(['\x1b]52;c;', 'SECRET\x07AFTER']), ['', 'AFTER']);
+  assert.deepEqual(sanitizeMany(['\x1bPq', 'SECRET\x1b\\AFTER']), ['', 'AFTER']);
   assert.equal(sanitize('a\x90dcs\x1b\\VISIBLE'), 'aVISIBLE');
 });
 
@@ -168,7 +174,7 @@ test('historical completed tools do not crowd current activity out of a read', (
     role: 'toolResult', toolCallId: `old${i}`, toolName: 'bash', content: [{ type: 'text', text: `old output ${i}` }],
   }));
   const tools: any = Object.fromEntries(messages.map((m, i) => [m.toolCallId, {
-    id: m.toolCallId, name: 'bash', args: { command: `old ${i}` }, running: false,
+    id: m.toolCallId, name: 'bash', args: { command: `old ${i}` }, running: false, reported: true,
     result: { content: [{ type: 'text', text: `old output ${i}` }] },
   }]));
   tools.current = { id: 'current', name: 'bash', args: { command: 'now' }, running: false, result: { content: [{ type: 'text', text: 'CURRENT OUTPUT' }] } };

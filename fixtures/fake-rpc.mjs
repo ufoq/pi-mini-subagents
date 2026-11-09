@@ -61,7 +61,7 @@ process.stdin.on('data', chunk => {
       case 'inject':
         message(assistant('\x1b[2JINJECTED'));
         emit({ type: 'tool_execution_start', toolCallId: 'i1', toolName: 'bash\x1b[2J', args: { command: 'printf \x1b]52;c;SECRET\x07', '\x1b[2Jkey': 'value' } });
-        emit({ type: 'tool_execution_update', toolCallId: 'i1', toolName: 'bash', partialResult: { content: [{ type: 'text', text: '\x9b2JPAYLOAD' }, { type: 'image', mimeType: 'image/png\x1b[2JIMAGE_PAYLOAD', data: 'AAAA' }] } });
+        emit({ type: 'tool_execution_update', toolCallId: 'i1', toolName: 'bash', partialResult: { content: [{ type: 'text', text: '\x9b2JPAYLOAD' }, { type: 'text', text: '\x1b]52;c;' }, { type: 'text', text: 'SECRET\x07AFTER' }, { type: 'text', text: '\x1bPq' }, { type: 'text', text: 'DCS_SECRET\x1b\\DCS_AFTER' }, { type: 'image', mimeType: 'image/png\x1b[2JIMAGE_PAYLOAD', data: 'AAAA' }] } });
         emit({ type: 'tool_execution_start', toolCallId: 'i2', toolName: 'edit', args: { path: 'tmp/preview-inject.txt', edits: [{ oldText: 'a', newText: 'b' }] } });
         emit({ type: 'tool_execution_end', toolCallId: 'i2', toolName: 'edit', result: { content: [{ type: 'text', text: 'edited' }], details: { diff: '+1 \x1b[2JEDIT_PAYLOAD' } }, isError: false });
         reply({}); break;

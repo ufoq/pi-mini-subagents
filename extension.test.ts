@@ -394,6 +394,9 @@ test('viewer sanitizes child text, arguments and results before rendering', asyn
     assert.match(detail, /PAYLOAD/);
     assert.match(detail, /EDIT_PAYLOAD/, 'diff details reach the native renderer');
     assert.match(detail, /image\/pngIMAGE_PAYLOAD/, 'the image fallback is rendered from sanitized metadata');
+    assert.match(detail, /AFTER/);
+    assert.match(detail, /DCS_AFTER/);
+    assert.ok(!detail.includes('SECRET') && !detail.includes('DCS_SECRET'), 'split control strings stay hidden');
     assert.ok(!detail.includes('\x1b[2J'), 'CSI is stripped from child text and status');
     assert.ok(!detail.includes('\x1b]52'), 'OSC is stripped from tool arguments');
     assert.ok(!detail.includes('\x9b'), '8-bit CSI is stripped from tool results');

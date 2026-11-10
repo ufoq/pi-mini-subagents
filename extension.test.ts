@@ -97,7 +97,7 @@ test('a preset-only project stays untrusted until there is a real trust decision
   const project = join(root, 'project');
   const old = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = agentDir;
-  const { tools } = adapter();
+  const { tools, handlers } = adapter();
   const ctx = { mode: 'rpc', cwd: project, isProjectTrusted: () => true, ui: { notify() {}, custom() {} } };
   const execute = (params: any) => tools[0].execute('t', params, undefined, undefined, ctx);
   try {
@@ -117,9 +117,16 @@ PROJECT
 `);
 
     // Pi auto-trusts a project with no recognized trust-requiring resources.
+    await handlers.get('session_start')({ reason: 'startup' }, ctx);
     const auto = await execute({ action: 'presets' });
     assert.match(auto.content[0].text, /shared \(user\)/);
     assert.doesNotMatch(auto.content[0].text, /oracle/);
+
+    // Adding a trust-gated resource then reloading must not rewrite history.
+    await mkdir(join(project, '.pi', 'prompts'), { recursive: true });
+    await handlers.get('session_start')({ reason: 'reload' }, ctx);
+    const reloaded = await execute({ action: 'presets' });
+    assert.doesNotMatch(reloaded.content[0].text, /oracle/);
 
     new ProjectTrustStore(agentDir).set(project, true);
     const trusted = await execute({ action: 'presets' });

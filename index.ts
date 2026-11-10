@@ -2,7 +2,7 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { StringEnum } from '@earendil-works/pi-ai';
 import { Type } from 'typebox';
 import { Agents, childInvocation, sanitize, type Status } from './agents.ts';
-import { composeSystemAppend, discoverPresets, findPreset, parseModel, parseThinking, parseTools, presetsReply, resolvePresetTrust, unknownPreset } from './presets.ts';
+import { composeSystemAppend, discoverPresets, findPreset, noteSessionStart, parseModel, parseThinking, parseTools, presetsReply, resolvePresetTrust, unknownPreset } from './presets.ts';
 
 export { parseModel } from './presets.ts';
 
@@ -29,7 +29,7 @@ export default function (pi: ExtensionAPI) {
       { triggerTurn: true, deliverAs: 'followUp' });
   });
 
-  pi.on('session_start', () => { registry(); });
+  pi.on('session_start', (event, ctx) => { noteSessionStart(ctx.cwd, event.reason); registry(); });
   pi.on('session_shutdown', async () => {
     if (agents) await agents.shutdown();
     // Session replacement owns a fresh registry, never the old handles.

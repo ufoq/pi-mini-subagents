@@ -99,7 +99,9 @@ presets ship with the extension.
 Pi does not treat `.pi/subagent-presets` itself as a trust-requiring resource.
 If a project contains only presets, Pi's automatic trust result is not enough:
 project presets load only with a saved trust decision or global
-`defaultProjectTrust: "always"`. Otherwise use user-level presets.
+`defaultProjectTrust: "always"`. Trust is evaluated when the session starts, so
+resources added later do not retroactively grant project-preset access.
+Otherwise use user-level presets.
 
 ```markdown
 ---

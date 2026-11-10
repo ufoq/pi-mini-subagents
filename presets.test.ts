@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { load } from './fixtures/pi-loader.ts';
 
 const { ProjectTrustStore } = await load.import('@earendil-works/pi-coding-agent');
-const { composeSystemAppend, discoverPresets, parseModel, parseThinking, parseTools, presetsReply, resolvePresetTrust, unknownPreset } = await load.import('../presets.ts');
+const { composeSystemAppend, discoverPresets, noteSessionStart, parseModel, parseThinking, parseTools, presetsReply, resolvePresetTrust, unknownPreset } = await load.import('../presets.ts');
 
 async function workspace() {
   const root = await mkdtemp(join(tmpdir(), 'mini-presets-'));
@@ -16,6 +16,23 @@ async function workspace() {
   await mkdir(join(agentDir, 'subagent-presets'), { recursive: true });
   return { root, agentDir, project };
 }
+
+test('trust provenance survives reload and uses the actual session cwd', async () => {
+  const ws = await workspace();
+  try {
+    const other = join(ws.root, 'other-project');
+    await mkdir(join(other, '.pi', 'prompts'), { recursive: true });
+    // A started with no recognized resources, then gained one during the session.
+    noteSessionStart(ws.project, 'startup');
+    await mkdir(join(ws.project, '.pi', 'prompts'), { recursive: true });
+    noteSessionStart(ws.project, 'reload');
+    assert.equal(resolvePresetTrust(ws.project, true, ws.agentDir), false, 'reload must not adopt a newly added resource');
+
+    // A session opened directly in another cwd uses that cwd's real resources.
+    noteSessionStart(other, 'startup');
+    assert.equal(resolvePresetTrust(other, true, ws.agentDir), true, 'the actual session cwd is used, not process.cwd()');
+  } finally { await rm(ws.root, { recursive: true, force: true }); }
+});
 
 test('project presets require a real trust decision when Pi has nothing to gate', async () => {
   const ws = await workspace();

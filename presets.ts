@@ -33,11 +33,11 @@ const TOOL_NAMES = new Set(['read', 'bash', 'powershell', 'edit', 'write', 'grep
 const THINKING_LEVELS = new Set<ThinkingLevel>(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const MAX_SYSTEM_APPEND = 64 * 1024;
-// Capture this before the session can add trust-gated project resources. A
-// project that Pi auto-trusted because it had nothing to gate must not become
-// "trusted" later just because a .pi/prompts or .pi/skills directory appears.
-const STARTUP_CWD = resolve(process.cwd());
-const STARTUP_TRUST_RESOURCES = hasTrustRequiringProjectResources(STARTUP_CWD);
+// Reload reimports this module. Keep the original per-cwd resource evidence on
+// the process global so a later /reload cannot turn a newly added .pi/prompts
+// directory into evidence of an original trust decision.
+const globalState = globalThis as typeof globalThis & { __piMiniSubagentsPresetTrust?: Map<string, boolean> };
+const TRUST_PROVENANCE = globalState.__piMiniSubagentsPresetTrust ??= new Map<string, boolean>();
 
 /** "provider/model" (model ids may contain slashes); undefined keeps the parent model. */
 export function parseModel(spec?: string): ModelRef | undefined {
@@ -76,7 +76,15 @@ export function parseTools(value: unknown): string[] | undefined {
  * Keep project presets fail-closed unless Pi made a real trust decision:
  * another trust-gated resource, a saved decision, or an explicit "always".
  */
-export function resolvePresetTrust(cwd: string, piTrusted: boolean, agentDir = getAgentDir(), startupResources = resolve(cwd) === STARTUP_CWD && STARTUP_TRUST_RESOURCES): boolean {
+/** Record whether trust-requiring resources existed when this runtime started. */
+export function noteSessionStart(cwd: string, reason?: string): void {
+  const key = resolve(cwd);
+  if (TRUST_PROVENANCE.has(key)) return;
+  // A reload with no prior entry has no trustworthy evidence; fail closed.
+  TRUST_PROVENANCE.set(key, reason !== 'reload' && hasTrustRequiringProjectResources(key));
+}
+
+export function resolvePresetTrust(cwd: string, piTrusted: boolean, agentDir = getAgentDir(), startupResources = TRUST_PROVENANCE.get(resolve(cwd)) ?? false): boolean {
   if (!piTrusted) return false;
   // Only a resource set that existed when Pi resolved trust is evidence that
   // this session made a real trust decision. Newly appearing resources are not.

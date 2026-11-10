@@ -468,13 +468,14 @@ all fixed with regressions:
   without asking, so `ctx.isProjectTrusted()` alone let a preset-only repository
   override user presets. `resolvePresetTrust()` now requires a real trust
   decision for such projects: a saved decision or global
-  `defaultProjectTrust: "always"`. A saved denial wins. The module captures
-  whether recognized trust resources existed at startup, so a directory added
-  later cannot turn an auto-trusted session into a trust decision. Tests cover
-  the auto-trusted-but-not-decided case, the live-resource drift case, saved
-  allow/deny, and the explicit default; an extension-level test proves
-  `action: "presets"` hides then reveals project presets only after the trust
-  store is updated.
+  `defaultProjectTrust: "always"`. A saved denial wins. The module records
+  per-cwd resource provenance on `session_start` and keeps it across `/reload`,
+  so resources added later cannot turn an auto-trusted session into a trust
+  decision. The real session cwd (which may differ from the process cwd when
+  resuming another session) is used. Tests cover the auto-trusted-but-not-decided
+  case, live-resource drift across reload, cross-cwd startup, saved allow/deny,
+  and the explicit default; an extension-level test proves `action: "presets"`
+  hides then reveals project presets only after the trust store is updated.
 - `--append-system-prompt` replaces Pi's normal append-source discovery, so a
   preset silently dropped the normally applicable `APPEND_SYSTEM.md`.
   `composeSystemAppend()` now keeps that normal append first and appends the
@@ -489,5 +490,5 @@ all fixed with regressions:
   releases the file, including provider failures; the fake-RPC test asserts the
   file is gone after a provider failure and after explicit stop.
 
-The full deterministic suite passed **72/72** after these fixes. Nothing was
+The full deterministic suite passed **73/73** after these fixes. Nothing was
 pushed, tagged or published during this review/fix round.

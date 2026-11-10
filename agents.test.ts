@@ -660,7 +660,7 @@ test('preset system append uses a temporary file, overrides tools, and is cleane
   assert.equal(spec.args[spec.args.indexOf('--tools') + 1], 'read,grep,find,ls');
   assert.ok(existsSync(promptFile));
 
-  const { agents } = setup();
+  const { agents, processes } = setup();
   try {
     assert.throws(() => agents.spawn(' ', spec), /non-empty message/);
     assert.equal(existsSync(promptFile), false, 'failed launch removes the prompt file');
@@ -671,7 +671,16 @@ test('preset system append uses a temporary file, overrides tools, and is cleane
     await until(() => agents.snapshot(id).status === 'running');
     assert.equal(agents.list()[0].preset, 'oracle');
     assert.match(agents.read(id), /^j1 running · oracle · fake-model\/fake/);
+    await processes[0].request('provider_error');
+    await until(() => agents.snapshot(id).status === 'failed');
+    assert.equal(existsSync(secondFile), false, 'failed settlement removes the prompt file');
     await agents.stop(id);
-    assert.equal(existsSync(secondFile), false, 'stop removes the prompt file');
+
+    const stopInvocation = childInvocation('/tmp', undefined, undefined, { systemAppend: 'STOP' });
+    const stopFile = stopInvocation.args[stopInvocation.args.indexOf('--append-system-prompt') + 1];
+    const stopId = agents.spawn('stop task', { ...stopInvocation, command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() }, 'oracle');
+    await until(() => agents.snapshot(stopId).status === 'running');
+    await agents.stop(stopId);
+    assert.equal(existsSync(stopFile), false, 'stop removes the prompt file');
   } finally { await agents.shutdown(); }
 });

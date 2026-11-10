@@ -112,15 +112,19 @@ The human viewer can inspect the full conversation independently.
 ### Presets
 
 Optional Markdown presets live under `~/.pi/agent/subagent-presets/` and, when
-the project is trusted, `<nearest-project>/.pi/subagent-presets/`. Project
-presets override user presets by name. Fields are `name`, `description`,
-`model`, `thinking`, `tools`, and either the Markdown body or a frontmatter
-`system_append`; the body is the conventional prompt. A preset sets launch
-defaults only: explicit spawn arguments win field by field, and `system_append`
-is preset-only and never a tool argument. No built-in presets, preset editor,
-inheritance, auto-routing or permission enforcement. A preset tool allowlist is
-launch configuration, not a sandbox. Presets are reread on each spawn/discovery
-call; running children keep their launch configuration.
+the project is genuinely trusted, `<nearest-project>/.pi/subagent-presets/`.
+Project presets override user presets by name. Pi does not classify
+`subagent-presets` as a trust-requiring resource, so a preset-only project also
+needs a saved trust decision or global `defaultProjectTrust: "always"`; the
+automatic trust result for projects with no gated resources is not sufficient.
+Fields are `name`, `description`, `model`, `thinking`, `tools`, and either the
+Markdown body or a frontmatter `system_append`; the body is the conventional
+prompt. Preset append is added after the normal `APPEND_SYSTEM.md`, not instead
+of it. A preset sets launch defaults only: explicit spawn arguments win field by
+field, and `system_append` is preset-only and never a tool argument. No built-in
+presets, preset editor, inheritance, auto-routing or permission enforcement. A
+preset tool allowlist is launch configuration, not a sandbox. Presets are reread
+on each spawn/discovery call; running children keep their launch configuration.
 
 ### Shared controller
 

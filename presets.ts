@@ -1,6 +1,6 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { CONFIG_DIR_NAME, getAgentDir, parseFrontmatter } from '@earendil-works/pi-coding-agent';
+import { CONFIG_DIR_NAME, getAgentDir, hasTrustRequiringProjectResources, parseFrontmatter, ProjectTrustStore, SettingsManager } from '@earendil-works/pi-coding-agent';
 import { label } from './agents.ts';
 
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
@@ -62,6 +62,40 @@ export function parseTools(value: unknown): string[] | undefined {
   const unknown = tools.filter(tool => !TOOL_NAMES.has(tool));
   if (unknown.length) throw new Error(`unknown tool${unknown.length === 1 ? '' : 's'} ${unknown.join(', ')}; use ${[...TOOL_NAMES].join(', ')}.`);
   return [...new Set(tools)];
+}
+
+/**
+ * Pi treats a project with no trust-requiring resources as trusted without
+ * asking. That is fine for projects with nothing to gate, but it would let a
+ * repository's `.pi/subagent-presets` override user presets without approval.
+ * Keep project presets fail-closed unless Pi made a real trust decision:
+ * another trust-gated resource, a saved decision, or an explicit "always".
+ */
+export function resolvePresetTrust(cwd: string, piTrusted: boolean, agentDir = getAgentDir()): boolean {
+  if (!piTrusted) return false;
+  if (hasTrustRequiringProjectResources(cwd)) return true;
+  const decision = new ProjectTrustStore(agentDir).get(cwd);
+  if (decision !== null) return decision;
+  const settings = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
+  return settings.getDefaultProjectTrust() === 'always';
+}
+
+function readAppendFile(path: string): string | undefined {
+  if (!existsSync(path)) return undefined;
+  try { return readFileSync(path, 'utf8').replace(/^\uFEFF/, ''); }
+  catch (error) { throw new Error(`could not read ${path}: ${error instanceof Error ? error.message : String(error)}`); }
+}
+
+/**
+ * Preserve the append source Pi would normally use, then add the preset text.
+ * `--append-system-prompt` replaces normal APPEND_SYSTEM.md discovery.
+ */
+export function composeSystemAppend(cwd: string, trusted: boolean, presetAppend: string, agentDir = getAgentDir()): string {
+  const projectPath = join(cwd, CONFIG_DIR_NAME, 'APPEND_SYSTEM.md');
+  const globalPath = join(agentDir, 'APPEND_SYSTEM.md');
+  const normalPath = trusted && existsSync(projectPath) ? projectPath : existsSync(globalPath) ? globalPath : undefined;
+  const normal = normalPath ? readAppendFile(normalPath)?.trim() : '';
+  return [normal, presetAppend.trim()].filter(Boolean).join('\n\n');
 }
 
 function isDirectory(path: string): boolean {

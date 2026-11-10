@@ -458,3 +458,30 @@ offline suite and the native mock-provider probe assert:
 The full deterministic suite passed **69/69** after these checks. No preset was
 published or installed globally; the release tag/publish decision remains the
 operator's.
+
+### Preset trust, normal append and prompt-file cleanup (0.2.0 review fixes)
+
+A functional review of the initial preset implementation found three issues,
+all fixed with regressions:
+
+- Pi treats a project with no recognized trust-requiring resources as trusted
+  without asking, so `ctx.isProjectTrusted()` alone let a preset-only repository
+  override user presets. `resolvePresetTrust()` now requires a real trust
+  decision for such projects: a saved decision or global
+  `defaultProjectTrust: "always"`. A saved denial wins. Tests cover the
+  auto-trusted-but-not-decided case, saved allow/deny, and the explicit default;
+  an extension-level test proves `action: "presets"` hides then reveals project
+  presets only after the trust store is updated.
+- `--append-system-prompt` replaces Pi's normal append-source discovery, so a
+  preset silently dropped `$PI_CODING_AGENT_DIR/APPEND_SYSTEM.md` (or a trusted
+  project append). `composeSystemAppend()` now keeps the applicable normal append
+  first and appends the preset text. Unit tests cover global fallback and
+  project-when-trusted selection; the native mock-provider probe asserts both the
+  normal marker and the preset marker in the real child system prompt.
+- A provider failure settles through `agent_settled` and bypassed the `failed()`
+  cleanup path, leaving the temp prompt file until stop/shutdown. Settlement now
+  releases the file, including provider failures; the fake-RPC test asserts the
+  file is gone after a provider failure and after explicit stop.
+
+The full deterministic suite passed **72/72** after these fixes. Nothing was
+pushed, tagged or published during this review/fix round.

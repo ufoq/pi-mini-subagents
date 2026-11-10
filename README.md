@@ -96,6 +96,11 @@ The nearest project directory wins; project presets load only when the project
 is trusted. A project preset with the same name overrides the user preset. No
 presets ship with the extension.
 
+Pi does not treat `.pi/subagent-presets` itself as a trust-requiring resource.
+If a project contains only presets, Pi's automatic trust result is not enough:
+project presets load only with a saved trust decision or global
+`defaultProjectTrust: "always"`. Otherwise use user-level presets.
+
 ```markdown
 ---
 name: oracle
@@ -114,6 +119,8 @@ be used instead of the body; it is **not** a tool argument.
 - `model` and `thinking` are optional; omitted means the parent's value.
 - `tools` is optional and accepts `read, grep, find, ls` or a YAML list. It
 defaults to all built-in coding tools. An explicit `tools` argument overrides it.
+- A preset's `system_append` is added after the normally applicable
+`APPEND_SYSTEM.md`; selecting a preset does not replace the normal append.
 - Explicit `model`, `thinking` and `tools` arguments override the corresponding
 preset field. The preset `system_append` still applies. `action`, `id` and
 `message` are always per-call values.

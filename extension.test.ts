@@ -7,6 +7,7 @@ import { load } from './fixtures/pi-loader.ts';
 import { Agents } from './agents.ts';
 import { RpcProcess } from './rpc.ts';
 const { default: register, completionNotification, parseModel, listReply, startingReply } = await load.import('../index.ts');
+const { ProjectTrustStore } = await load.import('@earendil-works/pi-coding-agent');
 const { AgentViewer } = await load.import('../viewer.ts');
 const { visibleWidth, CURSOR_MARKER } = await load.import('@earendil-works/pi-tui');
 const { initTheme, ToolExecutionComponent } = await load.import('@earendil-works/pi-coding-agent');
@@ -84,6 +85,45 @@ SYSTEM
     assert.match(listing.content[0].text, /oracle \(user\)/);
     await assert.rejects(execute({ action: 'spawn', preset: 'missing', message: 'x' }), /Unknown subagent preset/);
     assert.match((await execute({ action: 'list' })).content[0].text, /No subagents/);
+  } finally {
+    if (old === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = old;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a preset-only project stays untrusted until there is a real trust decision', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mini-ext-trust-'));
+  const agentDir = join(root, 'agent');
+  const project = join(root, 'project');
+  const old = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  const { tools } = adapter();
+  const ctx = { mode: 'rpc', cwd: project, isProjectTrusted: () => true, ui: { notify() {}, custom() {} } };
+  const execute = (params: any) => tools[0].execute('t', params, undefined, undefined, ctx);
+  try {
+    await mkdir(join(agentDir, 'subagent-presets'), { recursive: true });
+    await mkdir(join(project, '.pi', 'subagent-presets'), { recursive: true });
+    await writeFile(join(agentDir, 'subagent-presets', 'shared.md'), `---
+name: shared
+description: user
+---
+USER
+`);
+    await writeFile(join(project, '.pi', 'subagent-presets', 'oracle.md'), `---
+name: oracle
+description: project
+---
+PROJECT
+`);
+
+    // Pi auto-trusts a project with no recognized trust-requiring resources.
+    const auto = await execute({ action: 'presets' });
+    assert.match(auto.content[0].text, /shared \(user\)/);
+    assert.doesNotMatch(auto.content[0].text, /oracle/);
+
+    new ProjectTrustStore(agentDir).set(project, true);
+    const trusted = await execute({ action: 'presets' });
+    assert.match(trusted.content[0].text, /oracle \(project\)/);
   } finally {
     if (old === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = old;
     await rm(root, { recursive: true, force: true });

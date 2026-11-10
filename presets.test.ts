@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { load } from './fixtures/pi-loader.ts';
 
-const { discoverPresets, parseModel, parseThinking, parseTools, presetsReply, unknownPreset } = await load.import('../presets.ts');
+const { ProjectTrustStore } = await load.import('@earendil-works/pi-coding-agent');
+const { composeSystemAppend, discoverPresets, parseModel, parseThinking, parseTools, presetsReply, resolvePresetTrust, unknownPreset } = await load.import('../presets.ts');
 
 async function workspace() {
   const root = await mkdtemp(join(tmpdir(), 'mini-presets-'));
@@ -15,6 +16,37 @@ async function workspace() {
   await mkdir(join(agentDir, 'subagent-presets'), { recursive: true });
   return { root, agentDir, project };
 }
+
+test('project presets require a real trust decision when Pi has nothing to gate', async () => {
+  const ws = await workspace();
+  try {
+    // Pi auto-trusts a project with no recognized trust-requiring resources.
+    // That must not be enough to load repository-controlled presets.
+    assert.equal(resolvePresetTrust(ws.project, true, ws.agentDir), false);
+    const store = new ProjectTrustStore(ws.agentDir);
+    store.set(ws.project, true);
+    assert.equal(resolvePresetTrust(ws.project, true, ws.agentDir), true);
+    store.set(ws.project, false);
+    assert.equal(resolvePresetTrust(ws.project, true, ws.agentDir), false);
+    assert.equal(resolvePresetTrust(ws.project, false, ws.agentDir), false);
+
+    const alwaysDir = join(ws.root, 'always-agent');
+    await mkdir(alwaysDir);
+    await writeFile(join(alwaysDir, 'settings.json'), JSON.stringify({ defaultProjectTrust: 'always' }));
+    assert.equal(resolvePresetTrust(ws.project, true, alwaysDir), true);
+    assert.equal(resolvePresetTrust(ws.project, false, alwaysDir), false);
+  } finally { await rm(ws.root, { recursive: true, force: true }); }
+});
+
+test('preset append preserves normal append and uses project append only when trusted', async () => {
+  const ws = await workspace();
+  try {
+    await writeFile(join(ws.agentDir, 'APPEND_SYSTEM.md'), 'GLOBAL_APPEND');
+    await writeFile(join(ws.project, '.pi', 'APPEND_SYSTEM.md'), 'PROJECT_APPEND');
+    assert.equal(composeSystemAppend(ws.project, false, 'PRESET_APPEND', ws.agentDir), 'GLOBAL_APPEND\n\nPRESET_APPEND');
+    assert.equal(composeSystemAppend(ws.project, true, 'PRESET_APPEND', ws.agentDir), 'PROJECT_APPEND\n\nPRESET_APPEND');
+  } finally { await rm(ws.root, { recursive: true, force: true }); }
+});
 
 test('discovery loads user presets, trusts project presets, and lets project override', async () => {
   const ws = await workspace();

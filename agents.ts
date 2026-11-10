@@ -460,6 +460,9 @@ export class Agents {
         c.error = last?.errorMessage ?? (e.aborted ? 'Child run aborted.' : last?.stopReason === 'error' ? 'Child provider failed.' : undefined);
         c.status = c.error ? 'failed' : 'finished';
         c.streaming = undefined;
+        // Pi has already loaded the append prompt. Release its temp file at
+        // settlement, including provider failures that bypass failed().
+        c.cleanup?.(); c.cleanup = undefined;
         this.changed(c.id);
         this.complete(c.id, c.status);
         return;

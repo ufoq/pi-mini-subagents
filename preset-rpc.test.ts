@@ -21,6 +21,7 @@ thinking: low
 ---
 PRESET_SYSTEM_MARKER: treat this as a read-only consultation.
 `);
+  await writeFile(join(env.PI_CODING_AGENT_DIR, 'APPEND_SYSTEM.md'), 'NORMAL_APPEND_MARKER\n');
   const oldEnv = { ...process.env };
   Object.assign(process.env, env);
   const events: any[] = [];
@@ -44,6 +45,7 @@ PRESET_SYSTEM_MARKER: treat this as a read-only consultation.
     const request = mock.requests.filter(r => !isParent(r)).at(-1);
     const system = request.messages.filter((m: any) => m.role === 'system').map(text).join('\n');
     const user = request.messages.filter((m: any) => m.role === 'user').map(text).join('\n');
+    assert.match(system, /NORMAL_APPEND_MARKER/, 'preset preserves the normal append source');
     assert.match(system, /PRESET_SYSTEM_MARKER/, 'preset body is appended to the system prompt');
     assert.doesNotMatch(system, /MOCK_PRESET_TASK/, 'the task is not folded into the role prompt');
     assert.match(user, /MOCK_PRESET_TASK/, 'the task remains the user message');

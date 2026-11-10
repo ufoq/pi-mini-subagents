@@ -27,6 +27,10 @@ test('one compact tool, actionable validation, exact completion-only delivery an
   const { tools, commands, sent, handlers } = adapter();
   assert.equal(tools.length, 1); assert.equal(tools[0].name, 'subagent');
   assert.ok(Buffer.byteLength(JSON.stringify(tools[0].parameters)) < 700);
+  assert.ok(tools[0].parameters.properties.preset);
+  assert.ok(tools[0].parameters.properties.thinking);
+  assert.ok(tools[0].parameters.properties.tools);
+  assert.equal(tools[0].parameters.properties.system_append, undefined, 'system_append is preset-only, never a tool argument');
   const ctx = { mode: 'rpc', cwd: process.cwd(), isProjectTrusted: () => false, ui: { notify() {}, custom() { assert.fail('terminal UI in RPC'); } } };
   await handlers.get('session_start')({}, ctx);
   const execute = (params: any) => tools[0].execute('t', params, undefined, undefined, ctx);

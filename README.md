@@ -96,12 +96,10 @@ The nearest project directory wins; project presets load only when the project
 is trusted. A project preset with the same name overrides the user preset. No
 presets ship with the extension.
 
-Pi does not treat `.pi/subagent-presets` itself as a trust-requiring resource.
-If a project contains only presets, Pi's automatic trust result is not enough:
-project presets load only with a saved trust decision or global
-`defaultProjectTrust: "always"`. Trust is evaluated when the session starts, so
-resources added later do not retroactively grant project-preset access.
-Otherwise use user-level presets.
+Project presets follow Pi's own project-trust result. The extension adds no
+second trust rule. Pi treats a project whose only resource is
+`.pi/subagent-presets` as trusted, so use user-level presets when repository
+presets should not override them.
 
 ```markdown
 ---

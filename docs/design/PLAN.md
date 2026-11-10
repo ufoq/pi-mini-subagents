@@ -112,11 +112,11 @@ The human viewer can inspect the full conversation independently.
 ### Presets
 
 Optional Markdown presets live under `~/.pi/agent/subagent-presets/` and, when
-the project is genuinely trusted, `<nearest-project>/.pi/subagent-presets/`.
-Project presets override user presets by name. Pi does not classify
-`subagent-presets` as a trust-requiring resource, so a preset-only project also
-needs a saved trust decision or global `defaultProjectTrust: "always"`; the
-automatic trust result for projects with no gated resources is not sufficient.
+Pi reports the project as trusted, `<nearest-project>/.pi/subagent-presets/`.
+Project presets override user presets by name. Trust follows Pi's
+`isProjectTrusted()` result; the extension adds no second rule. Pi treats a
+preset-only project as trusted, so use user-level presets when repository
+presets should not override them.
 Fields are `name`, `description`, `model`, `thinking`, `tools`, and either the
 Markdown body or a frontmatter `system_append`; the body is the conventional
 prompt. Preset append is added after the normal `APPEND_SYSTEM.md`, not instead

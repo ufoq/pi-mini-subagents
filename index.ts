@@ -2,7 +2,7 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { StringEnum } from '@earendil-works/pi-ai';
 import { Type } from 'typebox';
 import { Agents, childInvocation, sanitize, type Status } from './agents.ts';
-import { composeSystemAppend, discoverPresets, findPreset, noteSessionStart, parseModel, parseThinking, parseTools, presetsReply, resolvePresetTrust, unknownPreset } from './presets.ts';
+import { composeSystemAppend, discoverPresets, findPreset, parseModel, parseThinking, parseTools, presetsReply, unknownPreset } from './presets.ts';
 
 export { parseModel } from './presets.ts';
 
@@ -29,7 +29,7 @@ export default function (pi: ExtensionAPI) {
       { triggerTurn: true, deliverAs: 'followUp' });
   });
 
-  pi.on('session_start', (event, ctx) => { noteSessionStart(ctx.cwd, event.reason); registry(); });
+  pi.on('session_start', () => { registry(); });
   pi.on('session_shutdown', async () => {
     if (agents) await agents.shutdown();
     // Session replacement owns a fresh registry, never the old handles.
@@ -54,21 +54,21 @@ export default function (pi: ExtensionAPI) {
         let text: string;
         if (params.action === 'spawn') {
           if (!params.message?.trim()) throw new Error('A non-empty message is required.');
-          const trusted = resolvePresetTrust(ctx.cwd, ctx.isProjectTrusted?.() ?? false);
+          const trusted = ctx.isProjectTrusted?.() ?? false;
           const discovery = discoverPresets({ cwd: ctx.cwd, trusted });
           const preset = params.preset === undefined ? undefined : findPreset(params.preset, discovery);
           if (params.preset !== undefined && !preset) throw new Error(unknownPreset(params.preset, discovery));
           const model = parseModel(params.model) ?? preset?.model ?? ctx.model;
           const thinking = parseThinking(params.thinking) ?? preset?.thinking ?? ctx.thinkingLevel;
           const tools = parseTools(params.tools) ?? preset?.tools;
-          const systemAppend = preset ? composeSystemAppend(ctx.cwd, preset.systemAppend) : undefined;
+          const systemAppend = preset ? composeSystemAppend(ctx.cwd, trusted, preset.systemAppend) : undefined;
           const id = a.spawn(params.message, childInvocation(ctx.cwd, model ?? undefined, thinking, {
             tools,
             systemAppend,
           }), preset?.name);
           text = startingReply(id, model ?? undefined, preset?.name);
         } else if (params.action === 'presets') {
-          const trusted = resolvePresetTrust(ctx.cwd, ctx.isProjectTrusted?.() ?? false);
+          const trusted = ctx.isProjectTrusted?.() ?? false;
           text = presetsReply(discoverPresets({ cwd: ctx.cwd, trusted }));
         } else if (params.action === 'list') {
           text = listReply(a.list());

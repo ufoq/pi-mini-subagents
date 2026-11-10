@@ -461,34 +461,21 @@ operator's.
 
 ### Preset trust, normal append and prompt-file cleanup (0.2.0 review fixes)
 
-A functional review of the initial preset implementation found three issues,
-all fixed with regressions:
-
-- Pi treats a project with no recognized trust-requiring resources as trusted
-  without asking, so `ctx.isProjectTrusted()` alone let a preset-only repository
-  override user presets. `resolvePresetTrust()` now requires a real trust
-  decision for such projects: a saved decision or global
-  `defaultProjectTrust: "always"`. A saved denial wins. The module records
-  per-cwd resource provenance on `session_start` and keeps it across `/reload`,
-  so resources added later cannot turn an auto-trusted session into a trust
-  decision. The real session cwd (which may differ from the process cwd when
-  resuming another session) is used. Tests cover the auto-trusted-but-not-decided
-  case, live-resource drift across reload, cross-cwd startup, saved allow/deny,
-  and the explicit default; an extension-level test proves `action: "presets"`
-  hides then reveals project presets only after the trust store is updated.
+- Project presets use Pi's `ctx.isProjectTrusted()` directly. The extension adds
+  no second trust layer: a project containing only `.pi/subagent-presets` is
+  auto-trusted by Pi, so its presets can override user presets by name. This is
+  deliberate; presets are launch configuration for sandboxed workers, not a
+  security boundary. A test confirms project presets appear only when the
+  context reports the project trusted.
 - `--append-system-prompt` replaces Pi's normal append-source discovery, so a
-  preset silently dropped the normally applicable `APPEND_SYSTEM.md`.
-  `composeSystemAppend()` now keeps that normal append first and appends the
-  preset text. It resolves the source using the child's effective trust, not the
-  parent's preset gate or parent CLI overrides: a saved project allow selects
-  the project append, while a saved denial or an unanswerable RPC trust prompt
-  selects the global append. Unit tests cover global fallback, saved allow/deny,
-  and child-versus-parent trust; the native mock-provider probe asserts both the
-  normal marker and the preset marker in the real child system prompt.
+  preset would otherwise drop `APPEND_SYSTEM.md`. `composeSystemAppend()` keeps
+  the project append when the context reports the project trusted, otherwise the
+  global append, then adds the preset text. Unit and native mock-provider tests
+  cover both sources and the preset marker.
 - A provider failure settles through `agent_settled` and bypassed the `failed()`
   cleanup path, leaving the temp prompt file until stop/shutdown. Settlement now
   releases the file, including provider failures; the fake-RPC test asserts the
   file is gone after a provider failure and after explicit stop.
 
-The full deterministic suite passed **73/73** after these fixes. Nothing was
+The full deterministic suite passed **71/71** after these fixes. Nothing was
 pushed, tagged or published during this review/fix round.

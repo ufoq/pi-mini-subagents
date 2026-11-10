@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { CONFIG_DIR_NAME, getAgentDir, hasTrustRequiringProjectResources, parseFrontmatter, ProjectTrustStore, SettingsManager } from '@earendil-works/pi-coding-agent';
+import { CONFIG_DIR_NAME, getAgentDir, parseFrontmatter } from '@earendil-works/pi-coding-agent';
 import { label } from './agents.ts';
 
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
@@ -33,11 +33,6 @@ const TOOL_NAMES = new Set(['read', 'bash', 'powershell', 'edit', 'write', 'grep
 const THINKING_LEVELS = new Set<ThinkingLevel>(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const MAX_SYSTEM_APPEND = 64 * 1024;
-// Reload reimports this module. Keep the original per-cwd resource evidence on
-// the process global so a later /reload cannot turn a newly added .pi/prompts
-// directory into evidence of an original trust decision.
-const globalState = globalThis as typeof globalThis & { __piMiniSubagentsPresetTrust?: Map<string, boolean> };
-const TRUST_PROVENANCE = globalState.__piMiniSubagentsPresetTrust ??= new Map<string, boolean>();
 
 /** "provider/model" (model ids may contain slashes); undefined keeps the parent model. */
 export function parseModel(spec?: string): ModelRef | undefined {
@@ -69,41 +64,6 @@ export function parseTools(value: unknown): string[] | undefined {
   return [...new Set(tools)];
 }
 
-/**
- * Pi treats a project with no trust-requiring resources as trusted without
- * asking. That is fine for projects with nothing to gate, but it would let a
- * repository's `.pi/subagent-presets` override user presets without approval.
- * Keep project presets fail-closed unless Pi made a real trust decision:
- * another trust-gated resource, a saved decision, or an explicit "always".
- */
-/** Record whether trust-requiring resources existed when this runtime started. */
-export function noteSessionStart(cwd: string, reason?: string): void {
-  const key = resolve(cwd);
-  if (TRUST_PROVENANCE.has(key)) return;
-  // A reload with no prior entry has no trustworthy evidence; fail closed.
-  TRUST_PROVENANCE.set(key, reason !== 'reload' && hasTrustRequiringProjectResources(key));
-}
-
-export function resolvePresetTrust(cwd: string, piTrusted: boolean, agentDir = getAgentDir(), startupResources = TRUST_PROVENANCE.get(resolve(cwd)) ?? false): boolean {
-  if (!piTrusted) return false;
-  // Only a resource set that existed when Pi resolved trust is evidence that
-  // this session made a real trust decision. Newly appearing resources are not.
-  if (startupResources) return true;
-  const decision = new ProjectTrustStore(agentDir).get(cwd);
-  if (decision !== null) return decision;
-  const settings = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
-  return settings.getDefaultProjectTrust() === 'always';
-}
-
-/** The trust a normal child process would resolve, without parent CLI overrides or UI. */
-export function resolveChildProjectTrust(cwd: string, agentDir = getAgentDir()): boolean {
-  if (!hasTrustRequiringProjectResources(cwd)) return true;
-  const decision = new ProjectTrustStore(agentDir).get(cwd);
-  if (decision !== null) return decision;
-  const settings = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
-  return settings.getDefaultProjectTrust() === 'always';
-}
-
 function readAppendFile(path: string): string | undefined {
   if (!existsSync(path)) return undefined;
   try { return readFileSync(path, 'utf8').replace(/^\uFEFF/, ''); }
@@ -114,12 +74,10 @@ function readAppendFile(path: string): string | undefined {
  * Preserve the append source Pi would normally use, then add the preset text.
  * `--append-system-prompt` replaces normal APPEND_SYSTEM.md discovery.
  */
-export function composeSystemAppend(cwd: string, presetAppend: string, agentDir = getAgentDir()): string {
+export function composeSystemAppend(cwd: string, trusted: boolean, presetAppend: string, agentDir = getAgentDir()): string {
   const projectPath = join(cwd, CONFIG_DIR_NAME, 'APPEND_SYSTEM.md');
   const globalPath = join(agentDir, 'APPEND_SYSTEM.md');
-  const normalPath = resolveChildProjectTrust(cwd, agentDir) && existsSync(projectPath)
-    ? projectPath
-    : existsSync(globalPath) ? globalPath : undefined;
+  const normalPath = trusted && existsSync(projectPath) ? projectPath : existsSync(globalPath) ? globalPath : undefined;
   const normal = normalPath ? readAppendFile(normalPath)?.trim() : '';
   return [normal, presetAppend.trim()].filter(Boolean).join('\n\n');
 }

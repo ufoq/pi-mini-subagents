@@ -47,14 +47,16 @@ Ask the parent to delegate a task with explicit boundaries, for example:
 The single tool is:
 
 ```ts
-subagent({ action: "spawn" | "list" | "read" | "send" | "stop",
-           id?: string, message?: string, model?: string })
+subagent({ action: "spawn" | "list" | "read" | "send" | "stop" | "presets",
+           id?: string, message?: string, model?: string, preset?: string,
+           thinking?: string, tools?: string })
 ```
 
 | Action | Required input | Effect |
 | --- | --- | --- |
-| `spawn` | `message` task brief | Returns `j1 starting on provider/model` immediately, before startup completes. Optional `model` (`"provider/model"`) overrides the child's model for this child only; omitted means the parent's model. |
-| `list` | — | Short ids, states and task labels; no transcripts. Adds a reminder that settled children retain memory until parent shutdown, while `subagent stop` releases any live process. |
+| `spawn` | `message` task brief | Returns `j1 starting` immediately, before startup completes. Optional `preset` supplies launch defaults; `model`, `thinking` and `tools` override the same preset fields for this child only. |
+| `presets` | — | Lists valid user/project presets and malformed preset files. Does not start a child. |
+| `list` | — | Short ids, states, preset names and task labels; no transcripts. Adds a reminder that settled children retain memory until parent shutdown, while `subagent stop` releases any live process. |
 | `read` | `id` | Latest result/diagnostic, or an attributed transcript (`assistant:`, `tool bash:`, `user:`) while running or after stop. Settled reads end with a retention/stop reminder. Bounded to about 8,000 characters. |
 | `send` | `id`, `message` | Same child/context. Native steering when busy, new turn when idle. |
 | `stop` | `id` | Explicitly terminates the owned process tree; id remains inspectable. |
@@ -79,10 +81,64 @@ wakes an idle parent and queues behind busy work. The parent explicitly fetches
 results. Explicit stop/shutdown does not send a completion wakeup. Submission
 through Pi's void API is not a delivery/consumption acknowledgment.
 
+## Presets
+
+A **preset** is optional, user-defined launch configuration, not a separate
+agent identity or runtime. Presets are read from Markdown files with YAML
+frontmatter:
+
+```text
+~/.pi/agent/subagent-presets/*.md
+<trusted-project>/.pi/subagent-presets/*.md
+```
+
+The nearest project directory wins; project presets load only when the project
+is trusted. A project preset with the same name overrides the user preset. No
+presets ship with the extension.
+
+```markdown
+---
+name: oracle
+description: Read-only engineering consultant.
+model: provider/model
+thinking: high
+tools: read, grep, find, ls
+---
+
+You are Oracle, an independent senior engineering consultant...
+```
+
+- `name` and `description` are required. The Markdown body is the prompt appended
+to Pi's normal system prompt. The optional frontmatter `system_append` field can
+be used instead of the body; it is **not** a tool argument.
+- `model` and `thinking` are optional; omitted means the parent's value.
+- `tools` is optional and accepts `read, grep, find, ls` or a YAML list. It
+defaults to all built-in coding tools. An explicit `tools` argument overrides it.
+- Explicit `model`, `thinking` and `tools` arguments override the corresponding
+preset field. The preset `system_append` still applies. `action`, `id` and
+`message` are always per-call values.
+- Presets are reread on every `spawn`/`presets` call; an existing child keeps the
+configuration it started with.
+- Preset tool restrictions are launch configuration, not a sandbox. A preset that
+includes `bash` can still mutate the workspace.
+
+Example:
+
+```ts
+subagent({ action: "spawn", preset: "oracle",
+           message: "Review this patch. Read only." })
+subagent({ action: "spawn", preset: "oracle", tools: "read",
+           message: "Answer with one file: rpc.ts" })
+```
+
+Use `subagent({ action: "presets" })` to discover available names and see invalid
+files. Unknown or invalid presets fail before any process starts.
+
 ## Human controls: `/agents`
 
 - `/agents` opens the existing child list, newest child first (`j7` above `j1`).
-  Up/down selects; Enter opens.
+  Up/down selects; Enter opens. Rows and the detail heading show the preset name
+  when one was used.
 - `/agents j1` directly opens that child when it exists.
 - The conversation shows earlier user/assistant messages, thinking, tool
   arguments/results, and live assistant/tool updates using public Pi renderers.
@@ -108,9 +164,9 @@ controls are separate from the TUI for a later explicit adapter.
 ## Execution and safety
 
 - Fresh child conversation, same cwd, parent's model and thinking at launch.
-  `spawn` may override the model per child with `model: "provider/model"`
-  (the rest of the launch configuration is fixed). Follow-up reuses that child.
-  No parent-transcript fork.
+  `spawn` may override `model`, `thinking` and `tools`, or apply those defaults
+  from a named preset. The remaining launch configuration is fixed. Follow-up
+  reuses that child. No parent-transcript fork.
 - Children inherit the parent's tools, skills, prompt templates and themes, but
   not its extensions: all built-in coding tools (`read`, `bash`/`powershell`,
   `edit`, `write`, `grep`, `find`, `ls`) and skills such as `web-search` are

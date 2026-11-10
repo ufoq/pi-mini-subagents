@@ -1,5 +1,6 @@
-import { realpathSync } from 'node:fs';
-import { basename } from 'node:path';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 import { RpcProcess, type Invocation, type RecordData } from './rpc.ts';
 
 export type Status = 'starting' | 'running' | 'finished' | 'failed' | 'stopped';
@@ -7,27 +8,38 @@ export interface ToolActivity {
   id: string; name: string; args: RecordData; result?: RecordData; running: boolean; isError?: boolean; interrupted?: boolean; reported?: boolean;
 }
 export interface Snapshot {
-  id: string; task: string; status: Status; sessionId?: string; model?: string;
+  id: string; task: string; status: Status; preset?: string; sessionId?: string; model?: string;
   messages: RecordData[]; streaming?: RecordData; interrupted?: string; interruptedMessage?: RecordData;
   tools: Record<string, ToolActivity>; result?: string; error?: string;
 }
-interface Child extends Snapshot { rpc: RpcProcess; ready: Promise<void>; held?: boolean; dirty?: boolean; pending?: Status[]; sequence?: number; pendingStart?: boolean }
+interface Child extends Snapshot { rpc: RpcProcess; ready: Promise<void>; held?: boolean; dirty?: boolean; pending?: Status[]; sequence?: number; pendingStart?: boolean; cleanup?: () => void }
 type ProcessFactory = (spec: Invocation, event: (e: RecordData) => void, failure: (e: Error) => void) => RpcProcess;
+export interface ChildOptions { tools?: string[]; systemAppend?: string }
 
-export function childInvocation(cwd: string, model?: { provider: string; id: string }, thinking?: string): Invocation {
+export function childInvocation(cwd: string, model?: { provider: string; id: string }, thinking?: string, options?: ChildOptions): Invocation {
   const shell = process.platform === 'win32' ? 'powershell' : 'bash';
   // All built-in tools plus inherited skills, templates and themes. Extensions
   // stay off, so MCP and our own `subagent` tool never load in a child. Children
   // write no transcript, so they never appear in Pi's /resume list.
-  const args = ['--mode', 'rpc', '--no-session', '--no-extensions', '--tools', `read,${shell},edit,write,grep,find,ls`];
+  const tools = options?.tools ?? `read,${shell},edit,write,grep,find,ls`.split(',');
+  const args = ['--mode', 'rpc', '--no-session', '--no-extensions', '--tools', tools.join(',')];
+  let cleanup: (() => void) | undefined;
+  if (options?.systemAppend) {
+    const dir = mkdtempSync(join(tmpdir(), 'pi-mini-subagents-'));
+    const file = join(dir, 'system-append.md');
+    try { writeFileSync(file, options.systemAppend, { encoding: 'utf8', mode: 0o600 }); }
+    catch (error) { try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ } throw error; }
+    args.push('--append-system-prompt', file);
+    cleanup = () => { try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ } };
+  }
   if (model) args.push('--provider', model.provider, '--model', model.id);
   if (thinking) args.push('--thinking', thinking);
   // Use the same CLI as the parent when running a standard Node installation.
-  if (!/^(?:node|bun)(?:\.exe)?$/.test(basename(process.execPath))) return { command: process.execPath, args, cwd };
+  if (!/^(?:node|bun)(?:\.exe)?$/.test(basename(process.execPath))) return { command: process.execPath, args, cwd, cleanup };
   let cli = process.argv[1];
   try { cli = realpathSync(cli); } catch { /* PATH fallback for embedded hosts. */ }
   const isPiCli = cli && /(?:^|\/)pi-coding-agent\/.*cli\.(?:js|ts)$/.test(cli);
-  return { command: isPiCli ? process.execPath : 'pi', args: isPiCli ? [cli, ...args] : args, cwd };
+  return { command: isPiCli ? process.execPath : 'pi', args: isPiCli ? [cli, ...args] : args, cwd, cleanup };
 }
 
 export function messageText(message?: RecordData, clean?: (text: string) => string): string {
@@ -233,19 +245,26 @@ export class Agents {
     this.createProcess = createProcess;
   }
 
-  spawn(message: string, invocation: Invocation): string {
-    requireMessage(message);
-    if (this.closing) throw new Error('Subagent registry is shutting down.');
+  spawn(message: string, invocation: Invocation, preset?: string): string {
+    try {
+      requireMessage(message);
+      if (this.closing) throw new Error('Subagent registry is shutting down.');
+    } catch (error) {
+      invocation.cleanup?.();
+      throw error;
+    }
     const id = `j${++this.sequence}`;
-    const child = { id, task: message, status: 'starting', messages: [], tools: {} } as Child;
+    const child = { id, task: message, preset, status: 'starting', messages: [], tools: {} } as Child;
     // Register first so a process factory that calls back synchronously can be
     // observed; hold notifications until launch has actually succeeded.
     child.held = true;
+    child.cleanup = invocation.cleanup;
     this.children.set(id, child);
     try {
       child.rpc = this.createProcess(invocation, event => this.event(child, event), error => this.failed(child, error));
     } catch (error) {
       // e.g. invalid argv: never retain a child that owns no process.
+      invocation.cleanup?.();
       this.children.delete(id);
       throw new Error(sanitize(`Could not start ${id}: ${error instanceof Error ? error.message : String(error)}`));
     }
@@ -283,17 +302,17 @@ export class Agents {
   /** Current status without copying the conversation, for hot UI paths. */
   status(id: string): Status { return this.get(id).status; }
   list() {
-    return [...this.children.values()].map(c => ({ id: c.id, status: c.status, task: label(c.task) }));
+    return [...this.children.values()].map(c => ({ id: c.id, status: c.status, task: label(c.task), preset: c.preset }));
   }
 
   snapshot(id: string): Snapshot {
-    const { rpc: _rpc, ready: _ready, held: _held, dirty: _dirty, pending: _pending, sequence: _sequence, pendingStart: _pendingStart, ...snapshot } = this.get(id);
+    const { rpc: _rpc, ready: _ready, held: _held, dirty: _dirty, pending: _pending, sequence: _sequence, pendingStart: _pendingStart, cleanup: _cleanup, ...snapshot } = this.get(id);
     return structuredClone(snapshot);
   }
 
   read(id: string): string {
     const c = this.get(id);
-    const header = `${id} ${c.status}${c.model ? ` · ${sanitize(c.model)}` : ''}`;
+    const header = `${id} ${c.status}${c.preset ? ` · ${sanitize(c.preset)}` : ''}${c.model ? ` · ${sanitize(c.model)}` : ''}`;
     const clean = createSanitizer();
     const prepared = prepareMessages(c, clean);
     const last = c.messages.findLast(m => m.role === 'assistant');
@@ -348,6 +367,7 @@ export class Agents {
     this.changed(id);
     try { await c.rpc.stop(); }
     catch (error) { throw new Error(sanitize(error instanceof Error ? error.message : String(error))); }
+    finally { c.cleanup?.(); c.cleanup = undefined; }
   }
 
   async shutdown(): Promise<void> {
@@ -382,6 +402,7 @@ export class Agents {
     if (c.pendingStart) { c.result = undefined; c.interrupted = undefined; c.interruptedMessage = undefined; c.pendingStart = false; }
     c.status = 'failed'; c.error = String(error instanceof Error ? error.message : error); c.streaming = undefined;
     interruptTools(c, 'Child process/command failed before tool completed.');
+    c.cleanup?.(); c.cleanup = undefined;
     this.changed(c.id);
     this.complete(c.id, c.status);
   }

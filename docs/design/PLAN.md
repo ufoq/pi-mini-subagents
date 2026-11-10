@@ -70,6 +70,7 @@ launch configuration, not a role/permission/inheritance framework.
 pi-mini-subagents/
   index.ts          Pi registration, tool, /agents, notification, shutdown hook
   agents.ts         plain registry and shared controller operations
+  presets.ts        Markdown preset discovery, validation and formatting
   rpc.ts            subprocess ownership and the small native RPC subset
   viewer.ts         child list/conversation/steering UI, TUI only
   *.test.ts         offline controller/transport/formatting tests
@@ -90,14 +91,16 @@ plugin registry, scheduler, event framework or new build toolchain.
 Start with one compact tool, provisionally `subagent`:
 
 ```text
-subagent({ action: "spawn" | "list" | "read" | "send" | "stop",
-           id?: string, message?: string })
+subagent({ action: "spawn" | "list" | "read" | "send" | "stop" | "presets",
+           id?: string, message?: string, preset?: string,
+           model?: string, thinking?: string, tools?: string })
 ```
 
 | Action | Meaning |
 | --- | --- |
-| `spawn` | `message` is the task brief. Register/start a child and return its id immediately; do not await its model run. Optional `model: "provider/model"` overrides that child's model; omitted means the parent's model. |
-| `list` | Return ids, short task labels and current state, not transcripts. |
+| `spawn` | `message` is the task brief. Register/start a child and return its id immediately; do not await its model run. Optional `preset` supplies launch defaults; explicit `model`, `thinking` and `tools` override the matching preset fields. |
+| `presets` | List valid user/project presets and malformed files. |
+| `list` | Return ids, short task labels, preset names and current state, not transcripts. |
 | `read` | Return the identified child's latest result/error; while working, return a short recent-activity view. No status-polling requirement. |
 | `send` | Deliver `message` to the same conversation, steering when busy or starting a new turn when idle. |
 | `stop` | Terminate that child and release its process resources. This is not parent Escape handling. |
@@ -105,6 +108,19 @@ subagent({ action: "spawn" | "list" | "read" | "send" | "stop",
 Validate required fields and unknown ids. Keep descriptions and results short.
 A bounded model-facing read is output/context hygiene, not a request budget.
 The human viewer can inspect the full conversation independently.
+
+### Presets
+
+Optional Markdown presets live under `~/.pi/agent/subagent-presets/` and, when
+the project is trusted, `<nearest-project>/.pi/subagent-presets/`. Project
+presets override user presets by name. Fields are `name`, `description`,
+`model`, `thinking`, `tools`, and either the Markdown body or a frontmatter
+`system_append`; the body is the conventional prompt. A preset sets launch
+defaults only: explicit spawn arguments win field by field, and `system_append`
+is preset-only and never a tool argument. No built-in presets, preset editor,
+inheritance, auto-routing or permission enforcement. A preset tool allowlist is
+launch configuration, not a sandbox. Presets are reread on each spawn/discovery
+call; running children keep their launch configuration.
 
 ### Shared controller
 

@@ -1,6 +1,6 @@
 {
   "name": "@ufoq/pi-mini-subagents",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Small persistent, observable and steerable Pi RPC subagents",
   "license": "MIT",
   "type": "module",
@@ -31,6 +31,7 @@
   "files": [
     "index.ts",
     "agents.ts",
+    "presets.ts",
     "rpc.ts",
     "viewer.ts",
     "README.md",

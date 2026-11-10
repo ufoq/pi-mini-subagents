@@ -425,3 +425,36 @@ once the child reports it. No registry-wide concurrency cap, idle reaper or
 budget was added: finished children remain until explicit stop or shutdown, which
 is documented as a limitation. The parent's own footer still excludes child
 spend, and no per-child usage accounting was added.
+
+### Preset launch defaults (0.2.0 prep)
+
+User-defined presets are optional named launch defaults, not identities. The
+offline suite and the native mock-provider probe assert:
+
+- Markdown presets are discovered under `~/.pi/agent/subagent-presets/` and, only
+  for a trusted project, the nearest `.pi/subagent-presets/`; project entries
+  override user entries by name;
+- the Markdown body is the system append, with an explicit frontmatter
+  `system_append` accepted as an alternative;
+- `name` and `description` are required, and `model`, `thinking`, `tools` are
+  validated before launch; malformed files are reported by `action: "presets"`
+  and skipped, and duplicate names within one scope are invalid;
+- no preset files ship with the package and there are no built-in presets;
+- a preset's `system_append` is passed through a per-child `0600` temporary file
+  to `--append-system-prompt`, never as a model tool argument; the file is
+  removed on failed launch, explicit stop and shutdown;
+- explicit spawn `model`, `thinking` and `tools` override the matching preset
+  fields, while the preset system append still applies; `action`, `id` and
+  `message` are never preset defaults;
+- the native child provider request contains the preset marker in its system
+  prompt, keeps the task in the user message, uses the preset model when no
+  explicit model is provided, uses the explicit `tools: "read"` allowlist when
+  supplied, and advertises no `subagent` tool;
+- `subagent list`, `read`, snapshots and `/agents` show the preset name;
+- preset launch still uses `--mode rpc --no-session --no-extensions`, so MCP,
+  extensions and recursive delegation remain unavailable. Preset tool
+  allowlists are launch restrictions, not a security sandbox.
+
+The full deterministic suite passed **69/69** after these checks. No preset was
+published or installed globally; the release tag/publish decision remains the
+operator's.

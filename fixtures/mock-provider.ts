@@ -30,8 +30,10 @@ export async function mockProvider() {
     const latest = users.at(-1) ?? '';
     const last = messages.at(-1);
     const parent = body.tools?.some((t: any) => t.function?.name === 'subagent');
+    const presetChild = !parent && JSON.stringify(messages).includes('PRESET_SYSTEM_MARKER');
     if (!parent) {
       const work = () => {
+        if (presetChild) { childFinals.push(Date.now()); answer(res, 'PRESET_CHILD_DONE'); return; }
         if (!messages.some((m: any) => m.role === 'tool')) answer(res, undefined, { name: 'bash', args: { command: 'printf TOOL_STARTED; sleep 2; printf TOOL_DONE' } });
         else { childFinals.push(Date.now()); answer(res, `CHILD_SECRET_RESULT cobalt. Inputs: ${users.join(' | ')}`); }
       };
@@ -40,6 +42,7 @@ export async function mockProvider() {
     } else if (last.role === 'tool') answer(res, 'PARENT_CONTINUES');
     else if (latest.includes('<system-notification>')) answer(res, 'NOTICE_SEEN');
     else if (latest.startsWith('DELEGATE_ALT')) answer(res, undefined, { name: 'subagent', args: { action: 'spawn', model: 'mock2/mock-alt', message: 'MOCK_ALT_CHILD remember cobalt. Use only the scratch task, do not modify files.' } });
+    else if (latest.startsWith('DELEGATE_PRESET')) answer(res, undefined, { name: 'subagent', args: { action: 'spawn', preset: 'oracle', tools: 'read', message: 'MOCK_PRESET_TASK remember cobalt. Use only the scratch task, do not modify files.' } });
     else if (latest.startsWith('DELEGATE')) answer(res, undefined, { name: 'subagent', args: { action: 'spawn', message: 'MOCK_CHILD remember cobalt. Use only the scratch task, do not modify files.' } });
     else if (latest.startsWith('READ')) answer(res, undefined, { name: 'subagent', args: { action: 'read', id: 'j1' } });
     else if (latest.startsWith('SEND')) answer(res, undefined, { name: 'subagent', args: { action: 'send', id: 'j1', message: 'follow-up recall color' } });

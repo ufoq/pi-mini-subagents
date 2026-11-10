@@ -196,7 +196,7 @@ export class AgentViewer {
       return [this.theme.bold(this.theme.fg('accent', `Subagents — existing conversations${rows.length ? ` (${rows.length})` : ''}`)),
         ...(rows.length ? rows.slice(start, start + visible).map((c, i) => {
           const row = start + i === index;
-          const line = `${row ? '> ' : '  '}${c.id} ${c.status}: ${c.task}`;
+          const line = `${row ? '> ' : '  '}${c.id}${c.preset ? ` (${sanitize(c.preset)})` : ''} ${c.status}: ${c.task}`;
           return row ? this.highlight(pad(line)) : pad(line);
         }) : ['No children. Ask the parent to use subagent spawn.']),
         ...(showHint ? [this.hint(width, ['↑↓ select · Enter open · Esc close (children keep running)', '↑↓ select · Enter open · Esc close', '↑↓ · Enter · Esc'])] : []),
@@ -225,7 +225,7 @@ export class AgentViewer {
     const lines = this.scroll.render(width);
     this.scroll.updateLayout(lines.length, Math.max(1, viewport), () => this.tui.requestRender());
     return [
-      fit(this.theme.bold(this.theme.fg('accent', `${snapshot.id} ${snapshot.status} — ${plain(snapshot.task)}`))),
+      fit(this.theme.bold(this.theme.fg('accent', `${snapshot.id}${snapshot.preset ? ` (${sanitize(snapshot.preset)})` : ''} ${snapshot.status} — ${plain(snapshot.task)}`))),
       ...lines.slice(this.scroll.scrollTop, this.scroll.scrollTop + viewport).map(fit),
       ...(showHint ? [fit(this.hint(width, ['PgUp/PgDn scroll · Ctrl+Y live · Ctrl+X stop · Esc list', 'PgUp/PgDn · Ctrl+Y · Ctrl+X · Esc', 'Ctrl+X stop · Esc']))] : []),
       ...(showStatus ? [fit(this.statusLine(mode, this.diagnostic, width))] : []),

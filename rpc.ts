@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { readdir, readFile } from 'node:fs/promises';
 
-export interface Invocation { command: string; args: string[]; cwd: string }
+export interface Invocation { command: string; args: string[]; cwd: string; cleanup?: () => void }
 // JSON records at the process boundary. Only the handful of commands/events used
 // by this extension are interpreted; unknown native events remain forwardable.
 export type RecordData = Record<string, any>;

@@ -2,31 +2,24 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { StringEnum } from '@earendil-works/pi-ai';
 import { Type } from 'typebox';
 import { Agents, childInvocation, sanitize, type Status } from './agents.ts';
+import { discoverPresets, findPreset, parseModel, parseThinking, parseTools, presetsReply, unknownPreset } from './presets.ts';
+
+export { parseModel } from './presets.ts';
 
 export function completionNotification(id: string, status: Status) {
   return `<system-notification>\nSubagent ${id} ${status}. Result/diagnostic available; use subagent read when needed. Settled children stay in memory; subagent stop releases any live child process.\n</system-notification>`;
 }
 
-export function startingReply(id: string, model?: { provider: string; id: string }) {
-  return `${id} starting${model ? ` on ${sanitize(model.provider)}/${sanitize(model.id)}` : ''}. Parent may continue; completion will notify. Results require read.`;
+export function startingReply(id: string, model?: { provider: string; id: string }, preset?: string) {
+  return `${id} starting${preset ? ` (${sanitize(preset)})` : ''}${model ? ` on ${sanitize(model.provider)}/${sanitize(model.id)}` : ''}. Parent may continue; completion will notify. Results require read.`;
 }
 
-export function listReply(rows: { id: string; status: Status; task: string }[]) {
-  const lines = rows.map(c => `${c.id} ${c.status}: ${c.task}`);
+export function listReply(rows: { id: string; status: Status; task: string; preset?: string }[]) {
+  const lines = rows.map(c => `${c.id} ${c.status}${c.preset ? ` (${sanitize(c.preset)})` : ''}: ${c.task}`);
   if (rows.some(c => c.status === 'finished' || c.status === 'failed')) {
     lines.push('Settled children retain memory; subagent stop releases any live child process.');
   }
   return lines.join('\n') || 'No subagents.';
-}
-
-/** "provider/model" (model ids may contain slashes); undefined keeps the parent model. */
-export function parseModel(spec?: string): { provider: string; id: string } | undefined {
-  if (spec === undefined) return undefined;
-  // Control characters (notably NUL) cannot be passed to a subprocess argv.
-  if (/[\u0000-\u001f\u007f-\u009f]/.test(spec)) throw new Error('model must not contain control characters.');
-  const match = /^([^/\s]+)\/(\S.*)$/.exec(spec.trim());
-  if (!match) throw new Error('model must be "provider/model", for example "anthropic/claude-sonnet-4-5".');
-  return { provider: match[1], id: match[2].trim() };
 }
 
 export default function (pi: ExtensionAPI) {
@@ -45,21 +38,35 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerTool({
     name: 'subagent', label: 'Subagent',
-    description: 'Persistent background Pi children in this cwd. spawn: task in message, optional model "provider/model" (default: parent model); list; read: result/error or attributed recent activity; send: steer/follow up in the same conversation; stop: terminate. Completion notifies without results. Put restrictions/file ownership in task prompts, not enforced here.',
+    description: 'Persistent background Pi children in this cwd. spawn: task in message; optional preset supplies launch defaults; model/thinking/tools override them. presets: list user/trusted-project presets. list; read: result/error or attributed recent activity; send: steer/follow up in the same conversation; stop: terminate. Completion notifies without results. Put restrictions/file ownership in task prompts, not enforced here.',
     parameters: Type.Object({
-      action: StringEnum(['spawn', 'list', 'read', 'send', 'stop'] as const),
+      action: StringEnum(['spawn', 'list', 'read', 'send', 'stop', 'presets'] as const),
       id: Type.Optional(Type.String()),
       message: Type.Optional(Type.String()),
       model: Type.Optional(Type.String({ description: '"provider/model" for this child; defaults to the parent model.' })),
+      preset: Type.Optional(Type.String()),
+      thinking: Type.Optional(Type.String()),
+      tools: Type.Optional(Type.String()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       try {
         const a = registry();
         let text: string;
         if (params.action === 'spawn') {
-          const model = parseModel(params.model) ?? ctx.model;
-          const id = a.spawn(params.message ?? '', childInvocation(ctx.cwd, model ?? undefined, ctx.thinkingLevel));
-          text = startingReply(id, model);
+          if (!params.message?.trim()) throw new Error('A non-empty message is required.');
+          const discovery = discoverPresets({ cwd: ctx.cwd, trusted: ctx.isProjectTrusted?.() ?? false });
+          const preset = params.preset === undefined ? undefined : findPreset(params.preset, discovery);
+          if (params.preset !== undefined && !preset) throw new Error(unknownPreset(params.preset, discovery));
+          const model = parseModel(params.model) ?? preset?.model ?? ctx.model;
+          const thinking = parseThinking(params.thinking) ?? preset?.thinking ?? ctx.thinkingLevel;
+          const tools = parseTools(params.tools) ?? preset?.tools;
+          const id = a.spawn(params.message, childInvocation(ctx.cwd, model ?? undefined, thinking, {
+            tools,
+            systemAppend: preset?.systemAppend,
+          }), preset?.name);
+          text = startingReply(id, model ?? undefined, preset?.name);
+        } else if (params.action === 'presets') {
+          text = presetsReply(discoverPresets({ cwd: ctx.cwd, trusted: ctx.isProjectTrusted?.() ?? false }));
         } else if (params.action === 'list') {
           text = listReply(a.list());
         } else {

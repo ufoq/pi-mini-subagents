@@ -1,5 +1,7 @@
 import { test } from 'node:test';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import assert from 'node:assert/strict';
 import { load } from './fixtures/pi-loader.ts';
 import { Agents } from './agents.ts';
@@ -24,8 +26,8 @@ function adapter() {
 test('one compact tool, actionable validation, exact completion-only delivery and RPC UI guard', async () => {
   const { tools, commands, sent, handlers } = adapter();
   assert.equal(tools.length, 1); assert.equal(tools[0].name, 'subagent');
-  assert.ok(Buffer.byteLength(JSON.stringify(tools[0].parameters)) < 600);
-  const ctx = { mode: 'rpc', ui: { notify() {}, custom() { assert.fail('terminal UI in RPC'); } } };
+  assert.ok(Buffer.byteLength(JSON.stringify(tools[0].parameters)) < 700);
+  const ctx = { mode: 'rpc', cwd: process.cwd(), isProjectTrusted: () => false, ui: { notify() {}, custom() { assert.fail('terminal UI in RPC'); } } };
   await handlers.get('session_start')({}, ctx);
   const execute = (params: any) => tools[0].execute('t', params, undefined, undefined, ctx);
   assert.match((await execute({ action: 'list' })).content[0].text, /No subagents/);
@@ -40,6 +42,8 @@ test('one compact tool, actionable validation, exact completion-only delivery an
   assert.ok(!content.includes('SECRET RESULT'));
   assert.equal(startingReply('j1'), 'j1 starting. Parent may continue; completion will notify. Results require read.');
   assert.match(startingReply('j1', { provider: 'mock', id: 'alias/model' }), /starting on mock\/alias\/model/);
+  assert.match(startingReply('j1', { provider: 'mock', id: 'mock' }, 'oracle'), /^j1 starting \(oracle\) on mock\/mock\./);
+  assert.match(listReply([{ id: 'j1', status: 'finished', task: 'review', preset: 'oracle' }]), /j1 finished \(oracle\): review/);
   assert.ok(!startingReply('j1', { provider: 'p\x1b]52;c;SECRET\x07', id: 'model' }).includes('SECRET'), 'inherited model echo is sanitized');
   assert.match(listReply([{ id: 'j1', status: 'finished', task: 'review' }]), /subagent stop releases any live child process/);
   assert.ok(!listReply([{ id: 'j1', status: 'running', task: 'review' }]).includes('subagent stop'));
@@ -54,6 +58,32 @@ test('one compact tool, actionable validation, exact completion-only delivery an
   assert.throws(() => parseModel('mock/bad\u0000id'), /control characters/);
   assert.throws(() => parseModel('mock/bad\u001bid'), /control characters/);
   assert.throws(() => parseModel('mock/bad\u009bid'), /control characters/);
+});
+
+test('presets action lists config and an unknown preset starts no child', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mini-ext-presets-'));
+  const old = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = root;
+  const { tools } = adapter();
+  const ctx = { mode: 'rpc', cwd: process.cwd(), isProjectTrusted: () => false, ui: { notify() {}, custom() {} } };
+  const execute = (params: any) => tools[0].execute('t', params, undefined, undefined, ctx);
+  try {
+    await mkdir(join(root, 'subagent-presets'));
+    await writeFile(join(root, 'subagent-presets', 'oracle.md'), `---
+name: oracle
+description: offline preset
+tools: read, grep
+---
+SYSTEM
+`);
+    const listing = await execute({ action: 'presets' });
+    assert.match(listing.content[0].text, /oracle \(user\)/);
+    await assert.rejects(execute({ action: 'spawn', preset: 'missing', message: 'x' }), /Unknown subagent preset/);
+    assert.match((await execute({ action: 'list' })).content[0].text, /No subagents/);
+  } finally {
+    if (old === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = old;
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('viewer lists newest subagents first', async () => {
@@ -74,6 +104,18 @@ test('viewer lists newest subagents first', async () => {
     // ↓ selects the second row, which is now the older child.
     viewer.focused = true; viewer.handleInput('\u001b[B'); viewer.handleInput('\r');
     assert.match(viewer.render(100).join('\n'), new RegExp(`${first} `), 'opens the older child under the cursor');
+  } finally { viewer.dispose(); await agents.shutdown(); }
+});
+
+test('viewer shows the preset on a child in both list and detail views', async () => {
+  const agents = new Agents(() => {});
+  const id = agents.spawn('preset task', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() }, 'oracle');
+  const theme = { fg: (_: string, s: string) => s, bg: (_: string, s: string) => s, bold: (s: string) => s };
+  const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 24 } }, theme, () => {}, process.cwd(), id);
+  try {
+    assert.match(viewer.render(80).join('\n'), /j1 \(oracle\)/);
+    viewer.handleInput('\u001b');
+    assert.match(viewer.render(80).join('\n'), /j1 \(oracle\)/);
   } finally { viewer.dispose(); await agents.shutdown(); }
 });
 

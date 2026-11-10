@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
 import { Agents, childInvocation, label, plain, sanitize, sanitizeMany, transcript } from './agents.ts';
 import { RpcProcess } from './rpc.ts';
 const invocation = { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() };
@@ -645,4 +646,32 @@ test('child CLI inherits parent resources except extensions, with all tools', ()
   assert.ok(!spec.args.includes('./index.ts'), 'our extension never loads in a child');
   assert.ok(spec.args.includes('provider')); assert.ok(spec.args.includes('model')); assert.ok(spec.args.includes('high'));
   for (const flag of ['--continue', '--fork', '--no-context-files', '--resume']) assert.ok(!spec.args.includes(flag));
+});
+
+test('preset system append uses a temporary file, overrides tools, and is cleaned up', async () => {
+  const spec = childInvocation('/tmp', { provider: 'provider', id: 'model' }, 'high', {
+    tools: ['read', 'grep', 'find', 'ls'],
+    systemAppend: 'PRESET SYSTEM APPEND',
+  });
+  const flag = spec.args.indexOf('--append-system-prompt');
+  assert.ok(flag > 0);
+  const promptFile = spec.args[flag + 1];
+  assert.equal(readFileSync(promptFile, 'utf8'), 'PRESET SYSTEM APPEND');
+  assert.equal(spec.args[spec.args.indexOf('--tools') + 1], 'read,grep,find,ls');
+  assert.ok(existsSync(promptFile));
+
+  const { agents } = setup();
+  try {
+    assert.throws(() => agents.spawn(' ', spec), /non-empty message/);
+    assert.equal(existsSync(promptFile), false, 'failed launch removes the prompt file');
+
+    const valid = childInvocation('/tmp', undefined, undefined, { systemAppend: 'SECOND' });
+    const secondFile = valid.args[valid.args.indexOf('--append-system-prompt') + 1];
+    const id = agents.spawn('preset task', { ...valid, command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() }, 'oracle');
+    await until(() => agents.snapshot(id).status === 'running');
+    assert.equal(agents.list()[0].preset, 'oracle');
+    assert.match(agents.read(id), /^j1 running · oracle · fake-model\/fake/);
+    await agents.stop(id);
+    assert.equal(existsSync(secondFile), false, 'stop removes the prompt file');
+  } finally { await agents.shutdown(); }
 });

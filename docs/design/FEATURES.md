@@ -184,9 +184,10 @@ These follow from the intended workflow, but their exact surface is not agreed:
 The user explicitly simplified the reference-based proposal. DEFAULTS.md now
 records the minimal loop: spawn, observe, steer/follow up, stop, and notify.
 Completion sends only a `<system-notification>` that the child is done and its
-result is available. Pi's existing delivery wakes an idle parent or reminds a
-busy one; parent fetches results on demand. There is no custom busy/idle routing,
-batching, retry ledger or Escape policy.
+result is available. Pi's existing `steer` delivery wakes an idle parent and
+enters a busy parent at the next message boundary; pending notices are coalesced
+into one message. Parent fetches results on demand. There is no retry ledger or
+Escape policy.
 
 Parent prompts govern allowed actions and task ownership. The model decides
 fan-out. Concurrency caps/queues, request budgets, automatic deadlines and

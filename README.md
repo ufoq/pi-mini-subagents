@@ -76,10 +76,12 @@ Subagent j1 finished. Result/diagnostic available; use subagent read when needed
 ```
 
 It contains identity/status/result availability, never result bodies, progress
-or diagnostics. Pi's normal `triggerTurn: true`, `deliverAs: "followUp"` delivery
-wakes an idle parent and queues behind busy work. The parent explicitly fetches
-results. Explicit stop/shutdown does not send a completion wakeup. Submission
-through Pi's void API is not a delivery/consumption acknowledgment.
+or diagnostics. Pi's `triggerTurn: true`, `deliverAs: "steer"` delivery wakes an
+idle parent and, when busy, delivers at the next message boundary after the
+current assistant turn and its tool calls. Completions that arrive together are
+coalesced into one notification message. The parent explicitly fetches results.
+Explicit stop/shutdown does not send a completion wakeup. Submission through
+Pi's void API is not a delivery/consumption acknowledgment.
 
 ## Presets
 

@@ -479,3 +479,24 @@ operator's.
 
 The full deterministic suite passed **71/71** after these fixes. Nothing was
 pushed, tagged or published during this review/fix round.
+
+### Completion batching and boundary delivery (0.2.1)
+
+- Completion notices are collected as `{ id, status }` entries. A single burst is
+  rendered in one `<system-notification>` with one line per child, followed by
+  the retention/stop reminder once.
+- `sendCompletionNotices()` uses `triggerTurn: true` and `deliverAs: "steer"`.
+  An idle parent is still woken; a busy parent receives the notice at the next
+  message boundary after the current assistant turn and its tool calls, rather
+  than waiting for the entire run to end as `followUp` did.
+- `createCompletionNotifier()` holds notices while a run is active and flushes
+  them at `turn_end`, so all children that finished during that turn share one
+  message. Notices arriving after the last boundary are flushed at `agent_end`.
+  While idle, a 100 ms coalescing window batches near-simultaneous completions
+  before waking the parent.
+- Unit tests cover the one-message burst text, idle coalescing, busy hold until
+  `turn_end`, post-boundary flush at `agent_end`, and the exact `steer` delivery
+  options. The native RPC probe still covers idle wake, mid-response child
+  completion without interrupting the parent, and explicit `read`.
+- The full deterministic suite passed **73/73**. Version is `0.2.1`; this change
+  is local and unpublished until the operator tags/releases it.

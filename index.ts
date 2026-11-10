@@ -6,8 +6,56 @@ import { composeSystemAppend, discoverPresets, findPreset, parseModel, parseThin
 
 export { parseModel } from './presets.ts';
 
-export function completionNotification(id: string, status: Status) {
-  return `<system-notification>\nSubagent ${id} ${status}. Result/diagnostic available; use subagent read when needed. Settled children stay in memory; subagent stop releases any live child process.\n</system-notification>`;
+export interface CompletionNotice { id: string; status: Status }
+
+/** One notice for a burst of completions; delivery still happens at the next message boundary. */
+export function completionNotification(notices: CompletionNotice[]) {
+  const lines = notices.map(({ id, status }) => `Subagent ${id} ${status}. Result/diagnostic available; use subagent read when needed.`);
+  lines.push('Settled children stay in memory; subagent stop releases any live child process.');
+  return `<system-notification>\n${lines.join('\n')}\n</system-notification>`;
+}
+
+export function sendCompletionNotices(pi: Pick<ExtensionAPI, 'sendMessage'>, notices: CompletionNotice[]) {
+  return pi.sendMessage(
+    { customType: 'mini-subagent-completion', content: completionNotification(notices), display: true },
+    { triggerTurn: true, deliverAs: 'steer' },
+  );
+}
+
+/**
+ * Coalesce completions into one notification per message boundary.
+ * While the parent is busy, notices wait for turn_end; when idle they wake it
+ * after a short window so a burst of child completions is still one message.
+ */
+export function createCompletionNotifier(send: (notices: CompletionNotice[]) => void, delayMs = 100) {
+  let pending: CompletionNotice[] = [];
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let busy = false;
+  const flush = () => {
+    if (timer !== undefined) { clearTimeout(timer); timer = undefined; }
+    if (!pending.length) return;
+    const notices = pending;
+    pending = [];
+    send(notices);
+  };
+  return {
+    add(id: string, status: Status) {
+      pending.push({ id, status });
+      if (busy || timer !== undefined) return;
+      timer = setTimeout(flush, delayMs);
+      timer.unref?.();
+    },
+    startRun() {
+      busy = true;
+      if (timer !== undefined) { clearTimeout(timer); timer = undefined; }
+    },
+    boundary: flush,
+    endRun() { busy = false; flush(); },
+    clear() {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = undefined; pending = []; busy = false;
+    },
+  };
 }
 
 export function startingReply(id: string, model?: { provider: string; id: string }, preset?: string) {
@@ -24,13 +72,18 @@ export function listReply(rows: { id: string; status: Status; task: string; pres
 
 export default function (pi: ExtensionAPI) {
   let agents: Agents | undefined;
-  const registry = () => agents ??= new Agents((id, status) => {
-    pi.sendMessage({ customType: 'mini-subagent-completion', content: completionNotification(id, status), display: true },
-      { triggerTurn: true, deliverAs: 'followUp' });
+  const notices = createCompletionNotifier((batch) => {
+    void Promise.resolve(sendCompletionNotices(pi, batch))
+      .catch(error => console.error('Subagent completion delivery failed:', error));
   });
+  const registry = () => agents ??= new Agents((id, status) => notices.add(id, status));
 
   pi.on('session_start', () => { registry(); });
+  pi.on('agent_start', () => notices.startRun());
+  pi.on('turn_end', () => notices.boundary());
+  pi.on('agent_end', () => notices.endRun());
   pi.on('session_shutdown', async () => {
+    notices.clear();
     if (agents) await agents.shutdown();
     // Session replacement owns a fresh registry, never the old handles.
     agents = undefined;

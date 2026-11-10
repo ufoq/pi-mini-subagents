@@ -25,7 +25,7 @@ or a shared blueprint.
 | Workspace | Same working directory. Parent coordinates assignments in prompts; no writer locks or automatic worktrees. |
 | Steering/follow-up | Send input to the same child using Pi's native prompt/steering behavior. A finished turn does not destroy the conversation. |
 | Observation | Child list, existing messages/tool activity, then live events. Agent and human controls use the same registry. Human viewing adds nothing to parent model context. |
-| Completion | Send only a concise `<system-notification>` that the child finished and its result is available. Include the child id, not the result body. It reminds a busy parent and wakes an idle one through Pi's normal delivery. Parent retrieves results when needed. |
+| Completion | Send only a concise `<system-notification>` that the child finished and its result is available. Include the child id, not the result body. Busy-parent notices are coalesced and delivered at the next message boundary with `steer`; an idle parent is woken after a short burst window. Parent retrieves results when needed. |
 | Stop | Direct child stop/termination control, independent of the parent's Escape behavior. |
 | History | A parent keeps its ordinary Pi transcript; children are ephemeral (`--no-session`) and leave nothing on disk. No separate orchestration persistence or recovery. |
 | Cleanup | Basic child-process cleanup when the extension shuts down. No elaborate session/branch handoff machinery. |
@@ -39,9 +39,11 @@ Subagent j1 finished. Its result is available; retrieve it when needed.
 </system-notification>
 ```
 
-Use Pi's normal turn-triggering delivery so an idle parent wakes up; no custom
-busy/idle checks or scheduler. Results/errors stay with the child for explicit
-retrieval through the existing inspection surface. Do not automatically inject
+Use Pi's `steer` delivery so busy-parent notices enter at the next message
+boundary instead of waiting for the whole run; coalesce pending notices into one
+message and use a short idle window to batch near-simultaneous completions.
+Results/errors stay with the child for explicit retrieval through the existing
+inspection surface. Do not automatically inject
 result bodies, progress streams or child transcripts into parent context.
 
 ## Explicitly out of v1

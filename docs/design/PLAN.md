@@ -153,7 +153,7 @@ Subscribe before the first prompt. RPC has no JSON-mode session header; use
   diagnostic for `read` and show failure honestly instead of leaving `running`.
 
 Use one short custom message through `pi.sendMessage`, with `display: true`,
-`triggerTurn: true`, and `deliverAs: "followUp"`:
+`triggerTurn: true`, and `deliverAs: "steer"`:
 
 ```text
 <system-notification>
@@ -162,10 +162,12 @@ Subagent j1 finished. Its result is available; retrieve it when needed.
 ```
 
 Include identity/status only, never the result body or diagnostics. The parent
-fetches them through `read`. Pi queues the notice when busy and wakes the parent
-when idle. No parent busy/idle checks, Escape policy, completion batching,
-retry/outbox ledger, delivery acknowledgment or continuation loop. The API
-returns void; do not claim submission proves model consumption.
+fetches them through `read`. While the parent is busy, coalesce pending notices
+and flush them at `turn_end` as one message so they arrive at the next message
+boundary; when idle, use a short timer to batch near-simultaneous completions
+and wake the parent. No Escape policy, retry/outbox ledger, delivery
+acknowledgment or continuation loop. The API returns void; do not claim
+submission proves model consumption.
 
 For process ownership, use a small native-RPC transport in `rpc.ts`, with strict
 LF/UTF-8 JSONL framing, request ids and continuously drained stdout/stderr.

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { load } from './fixtures/pi-loader.ts';
 import { Agents } from './agents.ts';
 import { RpcProcess } from './rpc.ts';
-const { default: register, completionNotification, parseModel, listReply, startingReply } = await load.import('../index.ts');
+const { default: register, completionNotification, createCompletionNotifier, sendCompletionNotices, parseModel, listReply, startingReply } = await load.import('../index.ts');
 const { AgentViewer } = await load.import('../viewer.ts');
 const { visibleWidth, CURSOR_MARKER } = await load.import('@earendil-works/pi-tui');
 const { initTheme, ToolExecutionComponent } = await load.import('@earendil-works/pi-coding-agent');
@@ -40,7 +40,7 @@ test('one compact tool, actionable validation, exact completion-only delivery an
   await commands[0].handler('', ctx);
   await handlers.get('session_shutdown')({}, ctx);
   assert.equal(sent.length, 0);
-  const content = completionNotification('j1', 'failed');
+  const content = completionNotification([{ id: 'j1', status: 'failed' }]);
   assert.match(content, /^<system-notification>\nSubagent j1 failed\./);
   assert.match(content, /subagent stop releases any live child process/);
   assert.ok(!content.includes('SECRET RESULT'));
@@ -62,6 +62,46 @@ test('one compact tool, actionable validation, exact completion-only delivery an
   assert.throws(() => parseModel('mock/bad\u0000id'), /control characters/);
   assert.throws(() => parseModel('mock/bad\u001bid'), /control characters/);
   assert.throws(() => parseModel('mock/bad\u009bid'), /control characters/);
+});
+
+test('completion notices coalesce into one steer message per boundary', async () => {
+  const batches: any[][] = [];
+  const notifier = createCompletionNotifier(batch => batches.push(batch), 10);
+  // Idle: a burst coalesces after the short wake window.
+  notifier.add('j1', 'finished');
+  notifier.add('j2', 'failed');
+  assert.deepEqual(batches, []);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.deepEqual(batches, [[{ id: 'j1', status: 'finished' }, { id: 'j2', status: 'failed' }]]);
+  // Busy: hold every completion until the turn boundary, then send one message.
+  notifier.startRun();
+  notifier.add('j3', 'finished');
+  notifier.add('j4', 'finished');
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(batches.length, 1, 'busy parent is not interrupted while the turn runs');
+  notifier.boundary();
+  assert.deepEqual(batches[1], [{ id: 'j3', status: 'finished' }, { id: 'j4', status: 'finished' }]);
+  // A completion after the last boundary still wakes the parent when the run ends.
+  notifier.add('j5', 'failed');
+  assert.equal(batches.length, 2);
+  notifier.endRun();
+  assert.deepEqual(batches[2], [{ id: 'j5', status: 'failed' }]);
+  assert.equal(completionNotification(batches[1] as any).match(/<system-notification>/g)?.length, 1);
+  notifier.clear();
+});
+
+test('completion delivery is one steer message with every finished id', async () => {
+  const sent: any[] = [];
+  const pi = { sendMessage: (...args: any[]) => sent.push(args) };
+  await sendCompletionNotices(pi as any, [{ id: 'j1', status: 'finished' }, { id: 'j2', status: 'failed' }]);
+  assert.equal(sent.length, 1);
+  const [message, options] = sent[0];
+  assert.equal(message.customType, 'mini-subagent-completion');
+  assert.equal(options.deliverAs, 'steer');
+  assert.equal(options.triggerTurn, true);
+  assert.match(message.content, /Subagent j1 finished/);
+  assert.match(message.content, /Subagent j2 failed/);
+  assert.equal(message.content.match(/<system-notification>/g)?.length, 1);
 });
 
 test('presets action lists config and an unknown preset starts no child', async () => {

@@ -81,11 +81,24 @@ test('completion notices coalesce into one steer message per boundary', async ()
   assert.equal(batches.length, 1, 'busy parent is not interrupted while the turn runs');
   notifier.boundary();
   assert.deepEqual(batches[1], [{ id: 'j3', status: 'finished' }, { id: 'j4', status: 'finished' }]);
-  // A completion after the last boundary still wakes the parent when the run ends.
+  // A completion after the last turn boundary is flushed when the run ends.
   notifier.add('j5', 'failed');
   assert.equal(batches.length, 2);
   notifier.endRun();
   assert.deepEqual(batches[2], [{ id: 'j5', status: 'failed' }]);
+  // agent_end is not idle: retry backoff keeps batching until the next run starts.
+  notifier.add('j6', 'finished');
+  notifier.add('j7', 'finished');
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(batches.length, 3);
+  notifier.startRun();
+  assert.deepEqual(batches[3], [{ id: 'j6', status: 'finished' }, { id: 'j7', status: 'finished' }]);
+  // Settlement enables idle batching again.
+  notifier.settled();
+  notifier.add('j8', 'finished');
+  notifier.add('j9', 'failed');
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.deepEqual(batches[4], [{ id: 'j8', status: 'finished' }, { id: 'j9', status: 'failed' }]);
   assert.equal(completionNotification(batches[1] as any).match(/<system-notification>/g)?.length, 1);
   notifier.clear();
 });

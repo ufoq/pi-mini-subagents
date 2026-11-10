@@ -491,12 +491,18 @@ pushed, tagged or published during this review/fix round.
   than waiting for the entire run to end as `followUp` did.
 - `createCompletionNotifier()` holds notices while a run is active and flushes
   them at `turn_end`, so all children that finished during that turn share one
-  message. Notices arriving after the last boundary are flushed at `agent_end`.
-  While idle, a 100 ms coalescing window batches near-simultaneous completions
+  message. Notices arriving after the last turn boundary are flushed at
+  `agent_end`, but idle mode is only entered at `agent_settled`; completions
+  during automatic retry backoff stay batched and are flushed when the next
+  `agent_start` runs its initial steering poll. `session_compact` and
+  `session_compact_failed` also flush pending notices so a completion during
+  inter-turn compaction reaches the upcoming request.
+- While idle, a 100 ms coalescing window batches near-simultaneous completions
   before waking the parent.
 - Unit tests cover the one-message burst text, idle coalescing, busy hold until
-  `turn_end`, post-boundary flush at `agent_end`, and the exact `steer` delivery
-  options. The native RPC probe still covers idle wake, mid-response child
-  completion without interrupting the parent, and explicit `read`.
+  `turn_end`, post-boundary flush at `agent_end`, retry batching at the next
+  `agent_start`, resumed idle batching after settlement, and the exact `steer`
+  delivery options. The native RPC probe still covers idle wake, mid-response
+  child completion without interrupting the parent, and explicit `read`.
 - The full deterministic suite passed **73/73**. Version is `0.2.1`; this change
   is local and unpublished until the operator tags/releases it.

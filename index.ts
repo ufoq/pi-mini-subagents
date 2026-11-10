@@ -24,8 +24,9 @@ export function sendCompletionNotices(pi: Pick<ExtensionAPI, 'sendMessage'>, not
 
 /**
  * Coalesce completions into one notification per message boundary.
- * While the parent is busy, notices wait for turn_end; when idle they wake it
- * after a short window so a burst of child completions is still one message.
+ * While the parent is busy, notices wait for the next turn, run or compaction
+ * boundary; when idle they wake it after a short window so a burst of child
+ * completions is still one message.
  */
 export function createCompletionNotifier(send: (notices: CompletionNotice[]) => void, delayMs = 100) {
   let pending: CompletionNotice[] = [];
@@ -48,9 +49,15 @@ export function createCompletionNotifier(send: (notices: CompletionNotice[]) => 
     startRun() {
       busy = true;
       if (timer !== undefined) { clearTimeout(timer); timer = undefined; }
+      // A retry or continuation is a fresh boundary: the initial steering poll
+      // runs after agent_start, so held notices join its first request.
+      flush();
     },
     boundary: flush,
-    endRun() { busy = false; flush(); },
+    // agent_end is only a low-level run boundary; retries and compaction can
+    // follow it. Hold idle batching until the session actually settles.
+    endRun: flush,
+    settled() { busy = false; flush(); },
     clear() {
       if (timer !== undefined) clearTimeout(timer);
       timer = undefined; pending = []; busy = false;
@@ -73,8 +80,12 @@ export function listReply(rows: { id: string; status: Status; task: string; pres
 export default function (pi: ExtensionAPI) {
   let agents: Agents | undefined;
   const notices = createCompletionNotifier((batch) => {
-    void Promise.resolve(sendCompletionNotices(pi, batch))
-      .catch(error => console.error('Subagent completion delivery failed:', error));
+    try {
+      void Promise.resolve(sendCompletionNotices(pi, batch))
+        .catch(error => console.error('Subagent completion delivery failed:', error));
+    } catch (error) {
+      console.error('Subagent completion delivery failed:', error);
+    }
   });
   const registry = () => agents ??= new Agents((id, status) => notices.add(id, status));
 
@@ -82,6 +93,11 @@ export default function (pi: ExtensionAPI) {
   pi.on('agent_start', () => notices.startRun());
   pi.on('turn_end', () => notices.boundary());
   pi.on('agent_end', () => notices.endRun());
+  pi.on('agent_settled', () => notices.settled());
+  // Compaction can run between turns; Pi polls steering after it, so flush
+  // held notices here to reach the upcoming request instead of the next turn.
+  pi.on('session_compact', () => notices.boundary());
+  pi.on('session_compact_failed', () => notices.boundary());
   pi.on('session_shutdown', async () => {
     notices.clear();
     if (agents) await agents.shutdown();

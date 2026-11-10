@@ -305,8 +305,8 @@ operation is required to implement or test the extension.
 
 No concurrency controls, scheduler, request/token budget, automatic job/idle
 timeout, read-only enforcement, writer lock, automatic worktree, role/depth
-framework, parent Escape interception, pause/resume propagation, completion
-batching/retry ledger, automatic eviction/parking/revival, durable recovery,
+framework, parent Escape interception, pause/resume propagation, completion retry ledger,
+automatic eviction/parking/revival, durable recovery,
 ACP backend, SDK host, full RPC reimplementation, or rollout to active workers.
 
 ## References checked

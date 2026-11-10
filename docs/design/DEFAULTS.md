@@ -54,8 +54,8 @@ result bodies, progress streams or child transcripts into parent context.
 - Automatic runtime deadlines, idle timeouts or watchdogs. Stop is explicit.
 - Read-only enforcement, tool-permission profiles and file ownership locks.
 - Parent Escape interception, stop/resume propagation and auto-wake suppression.
-- Completion batching, retry/outbox ledgers, acknowledgments or expensive
-  lifecycle checks before sending a notification.
+- Retry/outbox ledgers, delivery acknowledgments or expensive lifecycle checks
+  before sending a notification.
 - Automatic parking/revival, eviction policies and cross-restart recovery.
 - Worktrees, team/DAG orchestration, recursion/depth-policy frameworks.
 - A polished dashboard, Docker integration, or full native RPC parity as a

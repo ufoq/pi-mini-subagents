@@ -163,11 +163,11 @@ Subagent j1 finished. Its result is available; retrieve it when needed.
 
 Include identity/status only, never the result body or diagnostics. The parent
 fetches them through `read`. While the parent is busy, coalesce pending notices
-and flush them at `turn_end` as one message so they arrive at the next message
-boundary; when idle, use a short timer to batch near-simultaneous completions
-and wake the parent. No Escape policy, retry/outbox ledger, delivery
-acknowledgment or continuation loop. The API returns void; do not claim
-submission proves model consumption.
+and flush them as one message at `turn_end`, the next `agent_start`, a compaction
+boundary or `agent_end`, so they arrive at the next message boundary; when idle,
+use a short timer to batch near-simultaneous completions and wake the parent.
+No Escape policy, retry/outbox ledger, delivery acknowledgment or continuation
+loop. The API returns void; do not claim submission proves model consumption.
 
 For process ownership, use a small native-RPC transport in `rpc.ts`, with strict
 LF/UTF-8 JSONL framing, request ids and continuously drained stdout/stderr.

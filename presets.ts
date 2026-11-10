@@ -33,6 +33,11 @@ const TOOL_NAMES = new Set(['read', 'bash', 'powershell', 'edit', 'write', 'grep
 const THINKING_LEVELS = new Set<ThinkingLevel>(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const MAX_SYSTEM_APPEND = 64 * 1024;
+// Capture this before the session can add trust-gated project resources. A
+// project that Pi auto-trusted because it had nothing to gate must not become
+// "trusted" later just because a .pi/prompts or .pi/skills directory appears.
+const STARTUP_CWD = resolve(process.cwd());
+const STARTUP_TRUST_RESOURCES = hasTrustRequiringProjectResources(STARTUP_CWD);
 
 /** "provider/model" (model ids may contain slashes); undefined keeps the parent model. */
 export function parseModel(spec?: string): ModelRef | undefined {
@@ -71,9 +76,20 @@ export function parseTools(value: unknown): string[] | undefined {
  * Keep project presets fail-closed unless Pi made a real trust decision:
  * another trust-gated resource, a saved decision, or an explicit "always".
  */
-export function resolvePresetTrust(cwd: string, piTrusted: boolean, agentDir = getAgentDir()): boolean {
+export function resolvePresetTrust(cwd: string, piTrusted: boolean, agentDir = getAgentDir(), startupResources = resolve(cwd) === STARTUP_CWD && STARTUP_TRUST_RESOURCES): boolean {
   if (!piTrusted) return false;
-  if (hasTrustRequiringProjectResources(cwd)) return true;
+  // Only a resource set that existed when Pi resolved trust is evidence that
+  // this session made a real trust decision. Newly appearing resources are not.
+  if (startupResources) return true;
+  const decision = new ProjectTrustStore(agentDir).get(cwd);
+  if (decision !== null) return decision;
+  const settings = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
+  return settings.getDefaultProjectTrust() === 'always';
+}
+
+/** The trust a normal child process would resolve, without parent CLI overrides or UI. */
+export function resolveChildProjectTrust(cwd: string, agentDir = getAgentDir()): boolean {
+  if (!hasTrustRequiringProjectResources(cwd)) return true;
   const decision = new ProjectTrustStore(agentDir).get(cwd);
   if (decision !== null) return decision;
   const settings = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
@@ -90,10 +106,12 @@ function readAppendFile(path: string): string | undefined {
  * Preserve the append source Pi would normally use, then add the preset text.
  * `--append-system-prompt` replaces normal APPEND_SYSTEM.md discovery.
  */
-export function composeSystemAppend(cwd: string, trusted: boolean, presetAppend: string, agentDir = getAgentDir()): string {
+export function composeSystemAppend(cwd: string, presetAppend: string, agentDir = getAgentDir()): string {
   const projectPath = join(cwd, CONFIG_DIR_NAME, 'APPEND_SYSTEM.md');
   const globalPath = join(agentDir, 'APPEND_SYSTEM.md');
-  const normalPath = trusted && existsSync(projectPath) ? projectPath : existsSync(globalPath) ? globalPath : undefined;
+  const normalPath = resolveChildProjectTrust(cwd, agentDir) && existsSync(projectPath)
+    ? projectPath
+    : existsSync(globalPath) ? globalPath : undefined;
   const normal = normalPath ? readAppendFile(normalPath)?.trim() : '';
   return [normal, presetAppend.trim()].filter(Boolean).join('\n\n');
 }

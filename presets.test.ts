@@ -23,6 +23,11 @@ test('project presets require a real trust decision when Pi has nothing to gate'
     // Pi auto-trusts a project with no recognized trust-requiring resources.
     // That must not be enough to load repository-controlled presets.
     assert.equal(resolvePresetTrust(ws.project, true, ws.agentDir), false);
+    // A live check would see this new resource; the startup snapshot prevents
+    // an already-auto-trusted session from treating it as a trust decision.
+    await mkdir(join(ws.project, '.pi', 'prompts'), { recursive: true });
+    assert.equal(resolvePresetTrust(ws.project, true, ws.agentDir), false);
+    assert.equal(resolvePresetTrust(ws.project, true, ws.agentDir, true), true);
     const store = new ProjectTrustStore(ws.agentDir);
     store.set(ws.project, true);
     assert.equal(resolvePresetTrust(ws.project, true, ws.agentDir), true);
@@ -38,13 +43,26 @@ test('project presets require a real trust decision when Pi has nothing to gate'
   } finally { await rm(ws.root, { recursive: true, force: true }); }
 });
 
-test('preset append preserves normal append and uses project append only when trusted', async () => {
+test('preset append follows the child trust decision, not the parent preset gate', async () => {
   const ws = await workspace();
   try {
     await writeFile(join(ws.agentDir, 'APPEND_SYSTEM.md'), 'GLOBAL_APPEND');
     await writeFile(join(ws.project, '.pi', 'APPEND_SYSTEM.md'), 'PROJECT_APPEND');
-    assert.equal(composeSystemAppend(ws.project, false, 'PRESET_APPEND', ws.agentDir), 'GLOBAL_APPEND\n\nPRESET_APPEND');
-    assert.equal(composeSystemAppend(ws.project, true, 'PRESET_APPEND', ws.agentDir), 'PROJECT_APPEND\n\nPRESET_APPEND');
+    const store = new ProjectTrustStore(ws.agentDir);
+
+    // A normal RPC child with no saved decision cannot answer a trust prompt.
+    assert.equal(composeSystemAppend(ws.project, 'PRESET_APPEND', ws.agentDir), 'GLOBAL_APPEND\n\nPRESET_APPEND');
+    store.set(ws.project, true);
+    assert.equal(composeSystemAppend(ws.project, 'PRESET_APPEND', ws.agentDir), 'PROJECT_APPEND\n\nPRESET_APPEND');
+    // Parent --no-approve saves a false preset gate, but the child still uses
+    // the saved project allow for its normal append source.
+    assert.equal(resolvePresetTrust(ws.project, false, ws.agentDir), false);
+    assert.equal(composeSystemAppend(ws.project, 'PRESET_APPEND', ws.agentDir), 'PROJECT_APPEND\n\nPRESET_APPEND');
+    store.set(ws.project, false);
+    // Parent --approve can allow a project preset, but the child still follows
+    // its own saved denial and uses the global append.
+    assert.equal(resolvePresetTrust(ws.project, true, ws.agentDir, true), true);
+    assert.equal(composeSystemAppend(ws.project, 'PRESET_APPEND', ws.agentDir), 'GLOBAL_APPEND\n\nPRESET_APPEND');
   } finally { await rm(ws.root, { recursive: true, force: true }); }
 });
 

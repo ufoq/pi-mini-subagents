@@ -468,15 +468,21 @@ all fixed with regressions:
   without asking, so `ctx.isProjectTrusted()` alone let a preset-only repository
   override user presets. `resolvePresetTrust()` now requires a real trust
   decision for such projects: a saved decision or global
-  `defaultProjectTrust: "always"`. A saved denial wins. Tests cover the
-  auto-trusted-but-not-decided case, saved allow/deny, and the explicit default;
-  an extension-level test proves `action: "presets"` hides then reveals project
-  presets only after the trust store is updated.
+  `defaultProjectTrust: "always"`. A saved denial wins. The module captures
+  whether recognized trust resources existed at startup, so a directory added
+  later cannot turn an auto-trusted session into a trust decision. Tests cover
+  the auto-trusted-but-not-decided case, the live-resource drift case, saved
+  allow/deny, and the explicit default; an extension-level test proves
+  `action: "presets"` hides then reveals project presets only after the trust
+  store is updated.
 - `--append-system-prompt` replaces Pi's normal append-source discovery, so a
-  preset silently dropped `$PI_CODING_AGENT_DIR/APPEND_SYSTEM.md` (or a trusted
-  project append). `composeSystemAppend()` now keeps the applicable normal append
-  first and appends the preset text. Unit tests cover global fallback and
-  project-when-trusted selection; the native mock-provider probe asserts both the
+  preset silently dropped the normally applicable `APPEND_SYSTEM.md`.
+  `composeSystemAppend()` now keeps that normal append first and appends the
+  preset text. It resolves the source using the child's effective trust, not the
+  parent's preset gate or parent CLI overrides: a saved project allow selects
+  the project append, while a saved denial or an unanswerable RPC trust prompt
+  selects the global append. Unit tests cover global fallback, saved allow/deny,
+  and child-versus-parent trust; the native mock-provider probe asserts both the
   normal marker and the preset marker in the real child system prompt.
 - A provider failure settles through `agent_settled` and bypassed the `failed()`
   cleanup path, leaving the temp prompt file until stop/shutdown. Settlement now

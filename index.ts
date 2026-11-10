@@ -61,7 +61,7 @@ export default function (pi: ExtensionAPI) {
           const model = parseModel(params.model) ?? preset?.model ?? ctx.model;
           const thinking = parseThinking(params.thinking) ?? preset?.thinking ?? ctx.thinkingLevel;
           const tools = parseTools(params.tools) ?? preset?.tools;
-          const systemAppend = preset ? composeSystemAppend(ctx.cwd, trusted, preset.systemAppend) : undefined;
+          const systemAppend = preset ? composeSystemAppend(ctx.cwd, preset.systemAppend) : undefined;
           const id = a.spawn(params.message, childInvocation(ctx.cwd, model ?? undefined, thinking, {
             tools,
             systemAppend,

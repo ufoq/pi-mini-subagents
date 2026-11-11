@@ -1,12 +1,12 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { StringEnum } from '@earendil-works/pi-ai';
 import { Type } from 'typebox';
-import { Agents, childInvocation, sanitize, type Status } from './agents.ts';
+import { Agents, childInvocation, sanitize, type Outcome, type Status } from './agents.ts';
 import { composeSystemAppend, discoverPresets, findPreset, parseModel, parseThinking, parseTools, presetNamesLine, presetsReply, unknownPreset } from './presets.ts';
 
 export { parseModel } from './presets.ts';
 
-export interface CompletionNotice { id: string; status: Status }
+export interface CompletionNotice { id: string; outcome: Outcome; diagnostic?: string }
 export interface ReminderNotice { id: string; minutes: number }
 export type Notice = CompletionNotice | ReminderNotice;
 
@@ -16,9 +16,9 @@ const isReminder = (notice: Notice): notice is ReminderNotice => 'minutes' in no
 export function noticeNotification(notices: Notice[]) {
   const lines = notices.map(notice => isReminder(notice)
     ? `Subagent ${notice.id} has been running for ${notice.minutes} minute${notice.minutes === 1 ? '' : 's'}. Use subagent read to check progress; subagent stop if it is stuck.`
-    : `Subagent ${notice.id} ${notice.status}. Result/diagnostic available; use subagent read when needed.`);
+    : `Subagent ${notice.id} ${notice.outcome}${notice.diagnostic ? `: ${sanitize(notice.diagnostic).slice(0, 200)}` : ''}. Result/diagnostic available; use subagent read when needed.`);
   if (notices.some(notice => !isReminder(notice))) {
-    lines.push('Settled children stay in memory; subagent stop releases any live child process.');
+    lines.push('Stopped children stay readable; send resumes a live child; subagent remove releases the process and transcript.');
   }
   return `<system-notification>\n${lines.join('\n')}\n</system-notification>`;
 }
@@ -58,8 +58,8 @@ export function createCompletionNotifier(send: (notices: Notice[]) => void, dela
     timer.unref?.();
   };
   return {
-    add(id: string, status: Status) {
-      pending.push({ id, status });
+    add(id: string, outcome: Outcome, diagnostic?: string) {
+      pending.push(diagnostic === undefined ? { id, outcome } : { id, outcome, diagnostic });
       reminders.delete(id);
       schedule();
     },
@@ -68,6 +68,10 @@ export function createCompletionNotifier(send: (notices: Notice[]) => void, dela
       schedule();
     },
     cancel(id: string) { reminders.delete(id); },
+    drop(id: string) {
+      pending = pending.filter(notice => notice.id !== id);
+      reminders.delete(id);
+    },
     startRun() {
       busy = true;
       if (timer !== undefined) { clearTimeout(timer); timer = undefined; }
@@ -88,14 +92,14 @@ export function createCompletionNotifier(send: (notices: Notice[]) => void, dela
 }
 
 export function startingReply(id: string, model?: { provider: string; id: string }, preset?: string) {
-  return `${id} starting${preset ? ` (${sanitize(preset)})` : ''}${model ? ` on ${sanitize(model.provider)}/${sanitize(model.id)}` : ''}. Parent may continue; completion will notify. Results require read.`;
+  return `${id} active${preset ? ` (${sanitize(preset)})` : ''}${model ? ` on ${sanitize(model.provider)}/${sanitize(model.id)}` : ''}. Parent may continue; completion will notify. Results require read.`;
 }
 
 export function listReply(rows: { id: string; status: Status; task: string; preset?: string }[], presets?: string) {
   const lines = rows.length ? rows.map(c => `${c.id} ${c.status}${c.preset ? ` (${sanitize(c.preset)})` : ''}: ${c.task}`) : ['No subagents.'];
   if (presets) lines.push(presets);
-  if (rows.some(c => c.status === 'finished' || c.status === 'failed')) {
-    lines.push('Settled children retain memory; subagent stop releases any live child process.');
+  if (rows.some(c => c.status === 'stopped')) {
+    lines.push('Stopped children remain readable; send resumes a live child; subagent remove releases the process and transcript.');
   }
   return lines.join('\n');
 }
@@ -111,11 +115,12 @@ export default function (pi: ExtensionAPI) {
     }
   });
   const registry = () => agents ??= new Agents(
-    (id, status) => notices.add(id, status),
+    (id, outcome) => notices.add(id, outcome),
     undefined,
     {
       remind: (id, minutes) => notices.remind(id, minutes),
       cancelReminder: id => notices.cancel(id),
+      cancelNotices: id => notices.drop(id),
     },
   );
 
@@ -137,10 +142,10 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerTool({
     name: 'subagent', label: 'Subagent',
-    description: 'Persistent background Pi children in this cwd. spawn: task in message; optional preset supplies launch defaults; model/thinking/tools override them. list: children and available preset names; presets: full preset details. read: result/error or attributed recent activity; send: steer/follow up in the same conversation; stop: terminate. Completion notifies without results. Put restrictions/file ownership in task prompts, not enforced here.',
+    description: 'Persistent background Pi children in this cwd. spawn: task in message; optional preset supplies launch defaults; model/thinking/tools override them. list: children and available preset names; presets: full preset details. read: result/error or attributed recent activity; send: steer/follow up in the same conversation; stop: abort the current turn but keep the child; remove: kill the process and delete the transcript. Completion notifies without results. Put restrictions/file ownership in task prompts, not enforced here.',
     promptGuidelines: ['Call subagent({ action: "list" }) or subagent({ action: "presets" }) before choosing a preset; no presets are built in.'],
     parameters: Type.Object({
-      action: StringEnum(['spawn', 'list', 'read', 'send', 'stop', 'presets'] as const),
+      action: StringEnum(['spawn', 'list', 'read', 'send', 'stop', 'remove', 'presets'] as const),
       id: Type.Optional(Type.String()),
       message: Type.Optional(Type.String()),
       model: Type.Optional(Type.String({ description: '"provider/model" for this child; defaults to the parent model.' })),
@@ -178,7 +183,8 @@ export default function (pi: ExtensionAPI) {
           switch (params.action) {
             case 'read': text = a.read(params.id); break;
             case 'send': await a.send(params.id, params.message ?? ''); text = `${params.id}: input accepted in the same conversation.`; break;
-            case 'stop': await a.stop(params.id); text = `${params.id} stopped.`; break;
+            case 'stop': await a.stop(params.id); text = `${params.id} stopped; send continues this child.`; break;
+            case 'remove': await a.remove(params.id); text = `${params.id} removed.`; break;
             default: throw new Error('Unknown subagent action.');
           }
         }

@@ -79,11 +79,13 @@ export class AgentViewer {
       createGrepToolDefinition(cwd), createFindToolDefinition(cwd), createLsToolDefinition(cwd), createPowerShellToolDefinition(cwd),
     ].map(d => [d.name, d]));
     this.unsubscribe = agents.subscribe(id => {
-      if (!this.selected || this.selected === id) { this.dirty = true; this.snapshotCache = undefined; tui.requestRender(); }
+      if (this.selected && !agents.list().some(c => c.id === this.selected)) {
+        this.selected = undefined; this.snapshotCache = undefined; this.status = ''; this.dirty = true;
+      } else if (!this.selected || this.selected === id) { this.dirty = true; this.snapshotCache = undefined; }
+      tui.requestRender();
     });
     this.input.onSubmit = message => {
       if (!this.selected || !message.trim()) return;
-      if (this.mode() === 'stopped') { this.status = `${this.selected} is stopped; it cannot take more input.`; return; }
       const id = this.selected;
       this.input.setValue('');
       this.status = `Sending to ${id}…`;
@@ -92,7 +94,7 @@ export class AgentViewer {
     this.input.onEscape = () => this.back();
   }
   get focused() { return this._focused; }
-  set focused(value: boolean) { this._focused = value; this.input.focused = value && !!this.selected && this.mode() !== 'stopped'; }
+  set focused(value: boolean) { this._focused = value; this.input.focused = value && !!this.selected; }
 
   dispose() { this.unsubscribe(); }
   /** Newest child first, so a fresh spawn is at the top of the list. */
@@ -108,7 +110,7 @@ export class AgentViewer {
    */
   private statusLine(mode: Mode, error: string | undefined, width: number) {
     const detail = [error ? sanitize(error).replace(/\s+/g, ' ') : '', sanitize(this.status).replace(/\s+/g, ' ')].filter(Boolean).join(' · ');
-    const intent = !detail || visibleWidth(intentOf(mode)) + 3 + 6 <= width ? intentOf(mode) : shortIntentOf(mode);
+    const intent = detail && visibleWidth(intentOf(mode)) + 3 + visibleWidth(detail) > width ? shortIntentOf(mode) : intentOf(mode);
     return [intent, detail].filter(Boolean).join(' · ');
   }
   /** Re-open the highlight after every reset truncation may have inserted. */
@@ -120,7 +122,7 @@ export class AgentViewer {
   }
   /** What Enter would do for the highlighted child right now; derived, never cached. */
   private mode(): Mode {
-    return modeOf(this.selected ? this.agents.status(this.selected) : 'running');
+    return modeOf(this.selected ? this.agents.status(this.selected) : 'active');
   }
   invalidate() { this.dirty = true; this.snapshotCache = undefined; this.content.invalidate(); this.input.invalidate(); }
   private back() {
@@ -138,7 +140,7 @@ export class AgentViewer {
       else if (matchesKey(data, Key.down)) this.cursor = rows[Math.min(rows.length - 1, index + 1)]?.id;
       else if (matchesKey(data, Key.enter) && rows[index]) {
         this.selected = rows[index].id; this.dirty = true; this.snapshotCache = undefined;
-        this.input.focused = this.focused && this.mode() !== 'stopped'; this.scroll.scrollToEnd();
+        this.input.focused = this.focused; this.scroll.scrollToEnd();
       }
     } else if (matchesKey(data, Key.pageUp)) this.scroll.scrollBy(-Math.max(1, this.scroll.viewportHeight - 1));
     else if (matchesKey(data, Key.pageDown)) this.scroll.scrollBy(Math.max(1, this.scroll.viewportHeight - 1));
@@ -147,7 +149,7 @@ export class AgentViewer {
       const id = this.selected;
       this.status = `Stopping ${id}…`;
       void this.agents.stop(id).then(() => { this.status = `${id} stopped.`; }, error => { this.status = String(error); }).finally(() => this.tui.requestRender());
-    } else if (this.mode() !== 'stopped') this.input.handleInput(data);
+    } else this.input.handleInput(data);
     this.tui.requestRender();
   }
 
@@ -202,6 +204,10 @@ export class AgentViewer {
         ...(showHint ? [this.hint(width, ['↑↓ select · Enter open · Esc close (children keep running)', '↑↓ select · Enter open · Esc close', '↑↓ · Enter · Esc'])] : []),
       ].map(fit);
     }
+    if (this.selected && !this.agents.list().some(c => c.id === this.selected)) {
+      this.selected = undefined; this.snapshotCache = undefined; this.status = '';
+      return this.body(width, height);
+    }
     if (this.snapshotCache?.id !== this.selected) this.snapshotCache = { id: this.selected, value: this.agents.snapshot(this.selected) };
     const snapshot = this.snapshotCache.value;
     if (this.dirty) {
@@ -212,7 +218,7 @@ export class AgentViewer {
     // Reserve title, hint and input first; the hint and status line are the only
     // things that may be dropped when the terminal is extremely short.
     const mode = modeOf(snapshot.status);
-    this.input.focused = this.focused && mode !== 'stopped';
+    this.input.focused = this.focused;
     const showStatus = height >= 3;
     const showHint = height >= 5;
     const viewport = Math.max(0, height - 2 - (showHint ? 1 : 0) - (showStatus ? 1 : 0));
@@ -324,14 +330,14 @@ export class AgentViewer {
   }
 }
 
-type Mode = 'steer' | 'message' | 'stopped';
+type Mode = 'steer' | 'message';
 function modeOf(status: string): Mode {
-  return status === 'stopped' ? 'stopped' : status === 'starting' || status === 'running' ? 'steer' : 'message';
+  return status === 'active' ? 'steer' : 'message';
 }
-const tagOf = (mode: Mode) => mode === 'steer' ? 'live' : mode === 'message' ? 'idle' : 'stopped';
-const intentOf = (mode: Mode) => mode === 'steer' ? 'Enter→steer' : mode === 'message' ? 'Enter→new turn' : 'Stopped';
+const tagOf = (mode: Mode) => mode === 'steer' ? 'live' : 'idle';
+const intentOf = (mode: Mode) => mode === 'steer' ? 'Enter→steer' : 'Enter→new turn';
 /** A narrower intent, so a diagnostic keeps most of a short line. */
-const shortIntentOf = (mode: Mode) => mode === 'steer' ? 'steer' : mode === 'message' ? 'turn' : 'stopped';
+const shortIntentOf = (mode: Mode) => mode === 'steer' ? 'steer' : 'turn';
 
 export async function openViewer(agents: Agents, ctx: ExtensionContext, id?: string) {
   if (ctx.mode !== 'tui') return;

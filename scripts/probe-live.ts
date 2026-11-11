@@ -41,8 +41,8 @@ try {
   const marker = resolve(root, 'child-bash-marker');
   console.log(`Real-model smoke: ${model}; Pi ${version}; uid=${process.getuid?.()}; scratch under ${root}`);
   await prompt(`This is a tiny extension smoke test, not a coding task. Use ONLY the subagent tool. First spawn exactly one child with this exact task brief: "Do not read or change files, delegate, or use network. Remember the word ${token}. Use bash exactly once with command: printf CHILD_TOOL_OK; sleep 2; printf CHILD_TOOL_DONE > ${marker} . Then reply CHILD_READY. Preserve your conversation for later follow-up." After spawn, reply PARENT_CONTINUES. Do not list/read/send/stop yet. For any later system-notification, reply NOTICE_SEEN only; never automatically retrieve a child result. Wait for an explicit human request to read or follow up.`);
-  await until(() => toolResults().some(e => /j\d+-[a-z0-9]+ starting/.test(JSON.stringify(e.result))), 'spawn accepted');
-  const childId = /(j\d+-[a-z0-9]+) starting/.exec(JSON.stringify(toolResults()))?.[1];
+  await until(() => toolResults().some(e => /j\d+-[a-z0-9]+ active/.test(JSON.stringify(e.result))), 'spawn accepted');
+  const childId = /(j\d+-[a-z0-9]+) active/.exec(JSON.stringify(toolResults()))?.[1];
   assert.ok(childId, 'spawn reply contains a timestamped child id');
   const children = execFileSync('ps', ['-o', 'pid=,args=', '--ppid', String(rpc.pid)], { encoding: 'utf8' }).trim();
   if (cli) assert.ok(children.includes(resolve(cli)), 'child uses pinned Pi CLI');

@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { RpcProcess, type Invocation, type RecordData } from './rpc.ts';
 
-export type Status = 'starting' | 'running' | 'finished' | 'failed' | 'stopped';
+export type Status = 'active' | 'stopped';
+export type Outcome = 'finished' | 'failed';
 export interface ToolActivity {
   id: string; name: string; args: RecordData; result?: RecordData; running: boolean; isError?: boolean; interrupted?: boolean; reported?: boolean;
 }
@@ -12,13 +13,14 @@ export interface Snapshot {
   messages: RecordData[]; streaming?: RecordData; interrupted?: string; interruptedMessage?: RecordData;
   tools: Record<string, ToolActivity>; result?: string; error?: string;
 }
-interface Child extends Snapshot { rpc: RpcProcess; ready: Promise<void>; held?: boolean; dirty?: boolean; pending?: Status[]; sequence?: number; pendingStart?: boolean; cleanup?: () => void; reminder?: ReturnType<typeof setTimeout>; activeSince?: number }
+interface Child extends Snapshot { rpc: RpcProcess; ready: Promise<void>; held?: boolean; dirty?: boolean; pending?: Outcome[]; turnStarted?: boolean; dead?: boolean; control?: Promise<void>; cleanup?: () => void; reminder?: ReturnType<typeof setTimeout>; activeSince?: number }
 type ProcessFactory = (spec: Invocation, event: (e: RecordData) => void, failure: (e: Error) => void) => RpcProcess;
 export interface ChildOptions { tools?: string[]; systemAppend?: string }
 export interface AgentOptions {
   reminderMs?: number;
   remind?: (id: string, minutes: number) => void;
   cancelReminder?: (id: string) => void;
+  cancelNotices?: (id: string) => void;
 }
 
 export const REMINDER_MS = 10 * 60 * 1000;
@@ -239,35 +241,50 @@ function requireMessage(message: string) {
 }
 
 /** One session-local registry shared by model controls and human observation. */
+export const MAX_CHILDREN = 8;
+
 export class Agents {
   private children = new Map<string, Child>();
   private listeners = new Set<(id: string) => void>();
   private sequence = 0;
   private closing = false;
-  private notify: (id: string, status: Status) => void;
+  private notify: (id: string, outcome: Outcome) => void;
   private createProcess: ProcessFactory;
   private reminderMs: number;
   private remind?: (id: string, minutes: number) => void;
   private cancelReminder?: (id: string) => void;
+  private cancelNotices?: (id: string) => void;
 
-  constructor(notify: (id: string, status: Status) => void, createProcess: ProcessFactory = (spec, event, failure) => new RpcProcess(spec, event, failure), options: AgentOptions = {}) {
+  constructor(notify: (id: string, outcome: Outcome) => void, createProcess: ProcessFactory = (spec, event, failure) => new RpcProcess(spec, event, failure), options: AgentOptions = {}) {
     this.notify = notify;
     this.createProcess = createProcess;
     this.reminderMs = options.reminderMs ?? REMINDER_MS;
     this.remind = options.remind;
     this.cancelReminder = options.cancelReminder;
+    this.cancelNotices = options.cancelNotices;
+  }
+
+  /** FIFO per child: startup, sends and stops are accepted in invocation order. */
+  private enqueue<T>(c: Child, op: () => Promise<T>): Promise<T> {
+    const tail = c.control ?? Promise.resolve();
+    const next = tail.catch(() => {}).then(op);
+    c.control = next.then(() => {}, () => {});
+    return next;
   }
 
   spawn(message: string, invocation: Invocation, preset?: string): string {
     try {
       requireMessage(message);
       if (this.closing) throw new Error('Subagent registry is shutting down.');
+      if (this.children.size >= MAX_CHILDREN) {
+        throw new Error(`Subagent limit reached (${MAX_CHILDREN}). Read any output you need, then free a slot with subagent({ action: "remove", id: "<id>" }); remove releases its process and discards its transcript.`);
+      }
     } catch (error) {
       invocation.cleanup?.();
       throw error;
     }
     const id = `j${++this.sequence}-${Date.now().toString(36)}`;
-    const child = { id, task: message, preset, status: 'starting', messages: [], tools: {} } as Child;
+    const child = { id, task: message, preset, status: 'active', messages: [], tools: {} } as Child;
     // Register first so a process factory that calls back synchronously can be
     // observed; hold notifications until launch has actually succeeded.
     child.held = true;
@@ -283,36 +300,39 @@ export class Agents {
     }
     // Launch succeeded: publish everything a synchronous factory callback queued.
     child.held = false;
-    child.ready = this.start(child, message);
-    // Spawn counts as active so a launch that never reaches agent_start can
-    // still produce a reminder.
+    child.ready = this.enqueue(child, () => this.start(child, message));
+    // Active from spawn so a launch that never reaches agent_start can still
+    // produce a reminder; stop() sets stopped synchronously and cancels launch.
     child.activeSince = Date.now();
     this.armReminder(child);
     const provisional = child.dirty === true;
     if (provisional) { child.dirty = false; this.changed(id); }
-    for (const status of child.pending?.splice(0) ?? []) this.complete(id, status);
+    for (const outcome of child.pending?.splice(0) ?? []) this.complete(id, outcome);
     if (!provisional) this.changed(id);
     return id;
   }
 
   private async start(child: Child, message: string) {
     try {
-      // A synchronous factory callback may already have finished this launch.
-      if (child.status !== 'starting') return;
+      // A synchronous failure or a stop before launch means no prompt may run.
+      if (this.children.get(child.id) !== child || child.status === 'stopped') return;
       const state = await child.rpc.request('get_state');
       child.sessionId = state.sessionId;
       if (state.model) child.model = `${state.model.provider}/${state.model.id}`;
       const history = await child.rpc.request('get_messages');
-      // Live events can land while history is in flight; keep both, history first.
-      child.messages = [...(history.messages ?? []), ...child.messages];
-      if (child.status !== 'starting') return;
-      child.status = 'running';
-      this.changed(child.id);
+      // Live events can land while history is in flight; keep both without
+      // duplicating a message that Pi already included in the snapshot.
+      const historyMessages = history.messages ?? [];
+      const seen = new Set(historyMessages.map((m: RecordData) => JSON.stringify(m)));
+      child.messages = [...historyMessages, ...child.messages.filter(m => !seen.has(JSON.stringify(m)))];
+      if (this.children.get(child.id) !== child || child.status === 'stopped') return;
       const accepted = await child.rpc.request('prompt', { message, streamingBehavior: 'steer' });
       if (accepted.disposition === 'handled') throw new Error('Child prompt was handled without starting work.');
     } catch (error) {
-      this.failed(child, error);
-      await child.rpc.stop();
+      // A transport failure has already been published by failed(); a command
+      // rejection is recoverable and keeps the process for a later send.
+      if (this.children.get(child.id) !== child || child.dead) return;
+      this.refuse(child, error);
     }
   }
 
@@ -323,7 +343,7 @@ export class Agents {
   }
 
   snapshot(id: string): Snapshot {
-    const { rpc: _rpc, ready: _ready, held: _held, dirty: _dirty, pending: _pending, sequence: _sequence, pendingStart: _pendingStart, cleanup: _cleanup, reminder: _reminder, activeSince: _activeSince, ...snapshot } = this.get(id);
+    const { rpc: _rpc, ready: _ready, held: _held, dirty: _dirty, pending: _pending, turnStarted: _turnStarted, dead: _dead, control: _control, cleanup: _cleanup, reminder: _reminder, activeSince: _activeSince, ...snapshot } = this.get(id);
     return structuredClone(snapshot);
   }
 
@@ -336,19 +356,15 @@ export class Agents {
     const lastText = last ? messageText(last) : '';
     const error = c.error ? (c.error === prepared.lastErrorRaw ? prepared.lastError ?? '' : clean(c.error)) : '';
     const result = c.result ? (c.result === lastText ? prepared.lastAssistant ?? '' : clean(c.result)) : '';
-    if (c.status === 'failed') {
-      const shown = transcript(c, prepared, clean, true);
-      return bounded([header, error, result, shown].filter(Boolean).join('\n'), 'failed: transcript retained in memory until parent shutdown');
-    }
     if (c.status === 'stopped') {
-      const shown = transcript(c, prepared, clean);
+      const shown = transcript(c, prepared, clean, true);
       // The transcript already shows the latest assistant text, so avoid repeating it.
       // Deduplicate against the full result, not its clipped preview.
       const retained = result && !shown.includes(result) ? result : '';
-      return bounded([header, error, retained, shown].filter(Boolean).join('\n'), 'stopped: transcript retained in memory until parent shutdown');
-    }
-    if (c.status !== 'running' && c.status !== 'starting') {
-      return bounded([header, error, result].filter(Boolean).join('\n'), 'retained: transcript in memory; subagent stop releases any live child process');
+      const tail = c.dead
+        ? 'stopped: process gone; transcript retained until subagent remove'
+        : 'stopped: transcript retained; send continues this child; subagent remove releases the process and transcript';
+      return bounded([header, error, retained, shown].filter(Boolean).join('\n'), tail);
     }
     return bounded([header, transcript(c, prepared, clean)].filter(Boolean).join('\n'));
   }
@@ -356,42 +372,79 @@ export class Agents {
   async send(id: string, message: string): Promise<void> {
     requireMessage(message);
     const c = this.get(id);
-    await c.ready;
-    if (c.status === 'stopped') throw new Error(`Subagent ${id} is stopped; spawn a new child.`);
-    const idle = c.status !== 'running';
-    const sequence = c.sequence ?? 0;
-    try {
-      const accepted = await c.rpc.request('prompt', { message, streamingBehavior: 'steer' });
-      if (accepted.disposition === 'handled') throw new Error('Child prompt was handled without starting work.');
-      // Lifecycle events are authoritative. If none arrived yet, remember that
-      // this idle child still owes a start so a transport failure can discard
-      // the previous answer instead of presenting it as the new failure.
-      if (idle && (c.sequence ?? 0) === sequence) c.pendingStart = true;
-    } catch (error) {
-      // A rejected input is not proof that the child failed; leave retained
-      // state alone and report the rejection to the caller.
-      throw new Error(sanitize(error instanceof Error ? error.message : String(error)));
-    }
+    await this.enqueue(c, async () => {
+      if (this.children.get(c.id) !== c) throw new Error(`Unknown subagent ${JSON.stringify(sanitize(String(id)))}. Use list to find ids.`);
+      if (c.dead) throw new Error(`Subagent ${id} process is gone; read its output, then remove it.`);
+      // Only an idle send waits for a new agent_start. Steering an active run
+      // must not make a later transport failure discard the partial answer.
+      const idle = c.status === 'stopped';
+      const wasPending = c.turnStarted === true;
+      if (idle) c.turnStarted = true;
+      try {
+        const accepted = await c.rpc.request('prompt', { message, streamingBehavior: 'steer' });
+        if (accepted.disposition === 'handled') throw new Error('Child prompt was handled without starting work.');
+      } catch (error) {
+        if (idle && !wasPending) c.turnStarted = false;
+        if (c.dead) throw new Error(`Subagent ${id} process is gone; read its output, then remove it.`);
+        throw new Error(sanitize(error instanceof Error ? error.message : String(error)));
+      }
+    });
   }
 
   async stop(id: string): Promise<void> {
     const c = this.get(id);
     this.clearReminder(c);
     try { this.cancelReminder?.(id); } catch (error) { console.error('Subagent reminder cancellation failed:', error); }
+    // A dead child has no transport to abort. Repeated stop is safe: Pi's
+    // abort is a no-op on an idle child and waits for the run to settle.
+    if (c.dead) { c.status = 'stopped'; return; }
     c.status = 'stopped';
     // Keep what the child had produced so stop-then-read is still useful.
     if (c.streaming) { c.interrupted = messageText(c.streaming); c.interruptedMessage = c.streaming; }
     c.streaming = undefined;
     interruptTools(c, 'Stopped before tool completed.');
     this.changed(id);
-    try { await c.rpc.stop(); }
-    catch (error) { throw new Error(sanitize(error instanceof Error ? error.message : String(error))); }
-    finally { c.cleanup?.(); c.cleanup = undefined; }
+    await this.enqueue(c, async () => {
+      if (this.children.get(c.id) !== c) return;
+      try {
+        await c.rpc.request('clear_queue');
+        await c.rpc.request('abort');
+      } catch (error) {
+        if (!c.dead) {
+          c.error = String(error instanceof Error ? error.message : error);
+          throw new Error(sanitize(c.error));
+        }
+      } finally {
+        if (this.children.get(c.id) === c) {
+          c.status = 'stopped'; c.streaming = undefined; c.turnStarted = false;
+          c.cleanup?.(); c.cleanup = undefined;
+          this.changed(id);
+        }
+      }
+    });
+  }
+
+  async remove(id: string): Promise<void> {
+    const c = this.get(id);
+    this.clearReminder(c);
+    try { this.cancelReminder?.(id); this.cancelNotices?.(id); } catch (error) { console.error('Subagent notice cancellation failed:', error); }
+    c.cleanup?.(); c.cleanup = undefined;
+    // Delete and notify first: the cap slot and the viewer must not wait for
+    // the SIGTERM grace period. Queued operations re-check membership.
+    this.children.delete(id);
+    this.emit(id);
+    try { await c.rpc.stop(); } catch (error) { console.error('Subagent process cleanup failed:', error); }
   }
 
   async shutdown(): Promise<void> {
     this.closing = true;
-    await Promise.all([...this.children.keys()].map(id => this.stop(id)));
+    await Promise.all([...this.children.values()].map(async c => {
+      this.clearReminder(c);
+      try { this.cancelReminder?.(c.id); this.cancelNotices?.(c.id); } catch (error) { console.error('Subagent notice cancellation failed:', error); }
+      c.cleanup?.(); c.cleanup = undefined;
+      try { await c.rpc.stop(); } catch (error) { console.error('Subagent process cleanup failed:', error); }
+    }));
+    this.children.clear();
     this.listeners.clear();
   }
 
@@ -411,31 +464,56 @@ export class Agents {
     if (!child) return;
     // A provisional child is not published until its process exists.
     if (child.held) { child.dirty = true; return; }
+    this.emit(id);
+  }
+  private emit(id: string) {
     for (const listener of [...this.listeners]) {
       try { listener(id); } catch (error) { console.error('Subagent observer failed:', error); }
     }
   }
   private failed(c: Child, error: unknown) {
-    if (c.status === 'stopped' || c.status === 'failed') return;
+    if (this.children.get(c.id) !== c || c.dead) return;
+    c.dead = true;
     this.clearReminder(c);
+    try { this.cancelReminder?.(c.id); } catch (error) { console.error('Subagent reminder cancellation failed:', error); }
+    // A process exit after an already settled/stopped turn must not turn a
+    // completed result into a second failed notice; the transcript stays readable.
+    if (c.status === 'stopped' && !c.turnStarted) {
+      c.cleanup?.(); c.cleanup = undefined;
+      this.changed(c.id);
+      return;
+    }
     if (c.streaming) { c.interrupted = messageText(c.streaming); c.interruptedMessage = c.streaming; }
-    if (c.pendingStart) { c.result = undefined; c.interrupted = undefined; c.interruptedMessage = undefined; c.pendingStart = false; }
-    c.status = 'failed'; c.error = String(error instanceof Error ? error.message : error); c.streaming = undefined;
+    if (c.turnStarted) { c.result = undefined; c.interrupted = undefined; c.interruptedMessage = undefined; }
+    c.turnStarted = false;
+    c.status = 'stopped'; c.error = String(error instanceof Error ? error.message : error); c.streaming = undefined;
     interruptTools(c, 'Child process/command failed before tool completed.');
     c.cleanup?.(); c.cleanup = undefined;
     this.changed(c.id);
-    this.complete(c.id, c.status);
+    this.complete(c.id, 'failed');
+  }
+  /** A prompt rejected by a live child: stopped and retryable, never a process failure. */
+  private refuse(c: Child, error: unknown) {
+    if (this.children.get(c.id) !== c || c.dead) return;
+    this.clearReminder(c);
+    try { this.cancelReminder?.(c.id); } catch (error) { console.error('Subagent reminder cancellation failed:', error); }
+    if (c.streaming) { c.interrupted = messageText(c.streaming); c.interruptedMessage = c.streaming; }
+    c.turnStarted = false;
+    c.status = 'stopped'; c.error = String(error instanceof Error ? error.message : error); c.streaming = undefined;
+    c.cleanup?.(); c.cleanup = undefined;
+    this.changed(c.id);
+    this.complete(c.id, 'failed');
   }
 
   /** Attempt completion once, after launch, never for a discarded child. Delivery failures are logged, not retried. */
-  private complete(id: string, status: Status) {
+  private complete(id: string, outcome: Outcome) {
     if (this.closing) return;
     const child = this.children.get(id);
     // A discarded child never completes; a held one queues until launch.
     if (!child) return;
-    if (child.held) { (child.pending ??= []).push(status); return; }
+    if (child.held) { (child.pending ??= []).push(outcome); return; }
     try {
-      this.notify(id, status);
+      this.notify(id, outcome);
     } catch (error) {
       // Delivery failure must not invalidate an otherwise running child.
       console.error('Subagent completion delivery failed:', error);
@@ -443,11 +521,11 @@ export class Agents {
   }
 
   private event(c: Child, e: RecordData) {
-    if (c.status === 'stopped') return;
+    if (this.children.get(c.id) !== c) return;
     switch (e.type) {
       case 'agent_start':
-        c.sequence = (c.sequence ?? 0) + 1; c.pendingStart = false;
-        c.status = 'running'; c.error = undefined; c.result = undefined;
+        c.turnStarted = false;
+        c.status = 'active'; c.error = undefined; c.result = undefined;
         c.interrupted = undefined; c.interruptedMessage = undefined;
         if (c.reminder === undefined) {
           c.activeSince ??= Date.now();
@@ -478,18 +556,20 @@ export class Agents {
         break;
       }
       case 'agent_settled': {
-        c.sequence = (c.sequence ?? 0) + 1; c.pendingStart = false;
+        c.turnStarted = false;
         this.clearReminder(c);
+        try { this.cancelReminder?.(c.id); } catch (error) { console.error('Subagent reminder cancellation failed:', error); }
         const last = c.messages.findLast(m => m.role === 'assistant');
         c.result = messageText(last) || '(no assistant text)';
-        c.error = last?.errorMessage ?? (e.aborted ? 'Child run aborted.' : last?.stopReason === 'error' ? 'Child provider failed.' : undefined);
-        c.status = c.error ? 'failed' : 'finished';
+        const aborted = e.aborted === true;
+        c.error = aborted ? undefined : last?.errorMessage ?? (last?.stopReason === 'error' ? 'Child provider failed.' : undefined);
+        c.status = 'stopped';
         c.streaming = undefined;
         // Pi has already loaded the append prompt. Release its temp file at
         // settlement, including provider failures that bypass failed().
         c.cleanup?.(); c.cleanup = undefined;
         this.changed(c.id);
-        this.complete(c.id, c.status);
+        if (!aborted) this.complete(c.id, c.error ? 'failed' : 'finished');
         return;
       }
     }
@@ -500,10 +580,10 @@ export class Agents {
     if (this.reminderMs <= 0 || c.reminder !== undefined) return;
     c.reminder = setTimeout(() => {
       c.reminder = undefined;
-      if (this.children.get(c.id) !== c || (c.status !== 'starting' && c.status !== 'running')) return;
+      if (this.children.get(c.id) !== c || c.status !== 'active') return;
       const minutes = Math.max(1, Math.round((Date.now() - (c.activeSince ?? Date.now())) / 60_000));
       try { this.remind?.(c.id, minutes); } catch (error) { console.error('Subagent reminder delivery failed:', error); }
-      if (this.children.get(c.id) === c && (c.status === 'starting' || c.status === 'running')) this.armReminder(c);
+      if (this.children.get(c.id) === c && c.status === 'active') this.armReminder(c);
     }, this.reminderMs);
     c.reminder.unref?.();
   }

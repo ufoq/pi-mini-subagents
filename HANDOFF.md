@@ -32,8 +32,8 @@ Demonstrate this loop:
 7. The extension also works in a dedicated native-RPC parent test session without
    invoking terminal-only UI APIs.
 
-A single compact `subagent` tool with spawn/list/read/send/stop is the proposed
-starting interface. `/agents` is the human viewer. Reuse native Pi behavior and
+A single compact `subagent` tool with spawn/list/read/send/stop/remove is the
+proposed interface. `stop` aborts a turn but keeps the child; `remove` deletes it. `/agents` is the human viewer. Reuse native Pi behavior and
 public renderers; change provisional names/module splits if it reduces code.
 
 ## Work sequence
@@ -52,7 +52,7 @@ public renderers; change provisional names/module splits if it reduces code.
 
 ## Scope limits
 
-Do not add concurrency caps, queues, request budgets, automatic timeouts, read-only
+Do not add admission queues, request budgets, automatic timeouts, read-only
 profiles, writer locks, worktrees, Escape interception, parent pause/resume logic,
 completion outboxes, recovery, or automatic retention/parking policies. The model
 decides fan-out and writes permissions/task boundaries into prompts.

@@ -14,8 +14,8 @@ async function until(predicate: () => boolean) {
 function setup(options?: AgentOptions) {
   const processes: RpcProcess[] = [];
   const notices: any[] = [];
-  const agents = new Agents((id, status) => {
-    notices.push({ id, status, read: agents.read(id) });
+  const agents = new Agents((id, outcome) => {
+    notices.push({ id, outcome, read: agents.read(id) });
   }, (spec, event, failure) => {
     const rpc = new RpcProcess(spec, event, failure); processes.push(rpc); return rpc;
   }, options);
@@ -28,14 +28,14 @@ test('launch is immediate; late snapshot, live activity, steering and persistent
     const brief = 'Read-only. Own no files. Keep exactly this restriction.';
     const id = agents.spawn(brief, invocation);
     assert.equal(typeof id, 'string');
-    assert.equal(agents.list()[0].status, 'starting');
+    assert.equal(agents.list()[0].status, 'active');
     await until(() => agents.snapshot(id).tools.t1?.result?.content?.[0]?.text === 'live output');
     const snapshot = agents.snapshot(id);
     assert.equal(snapshot.messages[0].content, brief);
     assert.equal(snapshot.tools.t1.result.content[0].text, 'live output');
     assert.equal(notices.length, 0);
     await assert.rejects(agents.send(id, 'reject'), /prompt rejected/);
-    assert.equal(agents.snapshot(id).status, 'running');
+    assert.equal(agents.snapshot(id).status, 'active');
     assert.equal(agents.snapshot(id).tools.t1.running, true);
     assert.equal(notices.length, 0, 'rejected input is not completion');
     let updates = 0;
@@ -44,14 +44,15 @@ test('launch is immediate; late snapshot, live activity, steering and persistent
     await until(() => agents.snapshot(id).messages.some(m => m.content === 'correction'));
     await processes[0].request('finish');
     assert.equal(notices.length, 0, 'agent_end is not settlement');
+    await until(() => agents.snapshot(id).messages.some(m => m.role === 'user'));
     const running = agents.read(id);
     assert.match(running, /tool bash: done/, 'running read attributes tool output');
     assert.match(running, /assistant: /, 'running read attributes assistant output');
     await processes[0].request('settle');
-    assert.equal(agents.list()[0].status, 'finished');
+    assert.equal(agents.list()[0].status, 'stopped');
     assert.match(notices[0].read, /SECRET RESULT/);
-    assert.match(notices[0].read, new RegExp(`^${id} finished · fake-model\\/fake$`, 'm'));
-    assert.match(notices[0].read, /retained: transcript in memory; subagent stop releases any live child process/);
+    assert.match(notices[0].read, new RegExp(`^${id} stopped · fake-model\\/fake$`, 'm'));
+    assert.match(notices[0].read, /stopped: transcript retained; send continues this child; subagent remove releases the process and transcript/);
     assert.ok(updates > 0);
     unsubscribe();
     const previousUpdates = updates;
@@ -68,27 +69,37 @@ test('launch is immediate; late snapshot, live activity, steering and persistent
   } finally { await agents.shutdown(); }
 });
 
-test('no five-child cap, no queue, no notices or transcripts on launch/list', async () => {
+test('the registry admits eight children and rejects the ninth with a remove hint', async () => {
   const { agents, processes, notices } = setup();
   try {
-    for (let i = 0; i < 7; i++) agents.spawn('task ' + i, invocation);
-    assert.equal(processes.length, 7);
-    assert.equal(agents.list().length, 7);
+    for (let i = 0; i < 8; i++) agents.spawn('task ' + i, invocation);
+    assert.equal(processes.length, 8);
+    assert.equal(agents.list().length, 8);
     assert.ok(!JSON.stringify(agents.list()).includes('messages'));
+    let cleaned = 0;
+    assert.throws(() => agents.spawn('overflow', { ...invocation, cleanup: () => { cleaned++; } }), /limit reached \(8\).*remove/);
+    assert.equal(cleaned, 1, 'cap rejection releases the preset temp file');
+    assert.equal(processes.length, 8, 'the rejected spawn did not create a process');
+    assert.equal(agents.list().length, 8);
     assert.equal(notices.length, 0);
-    await until(() => agents.list().every(a => a.status === 'running'));
+    const [first] = agents.list();
+    await agents.stop(first.id);
+    assert.throws(() => agents.spawn('still full', invocation), /limit reached/);
+    await agents.remove(first.id);
+    assert.doesNotThrow(() => agents.spawn('after remove', invocation));
+    assert.equal(agents.list().length, 8);
+    assert.ok(agents.list().every(a => a.status === 'active' || a.status === 'stopped'));
+    assert.equal(notices.length, 0);
   } finally { await agents.shutdown(); }
-  assert.ok(agents.list().every(a => a.status === 'stopped'));
-  assert.equal(notices.length, 0);
 });
 
 test('settled result and error text are sanitized in read', async () => {
   const { agents, processes } = setup();
   try {
     const id = agents.spawn('controls', invocation);
-    await until(() => agents.snapshot(id).status === 'running');
+    await until(() => agents.snapshot(id).status === 'active');
     await processes[0].request('result');
-    await until(() => agents.snapshot(id).status === 'finished');
+    await until(() => agents.snapshot(id).status === 'stopped');
     const text = agents.read(id);
     assert.match(text, /CLEAN link done/);
     assert.ok(!text.includes('\x1b'), 'no escape sequences reach the parent');
@@ -102,21 +113,23 @@ test('provider failure, process failure, validation and result read bounds', asy
     assert.throws(() => agents.spawn(' ', invocation), /message/);
     assert.throws(() => agents.read('missing'), /Unknown/);
     const id = agents.spawn('task', invocation);
-    await until(() => agents.list()[0].status === 'running');
+    await until(() => agents.list()[0].status === 'active');
     await assert.rejects(agents.send(id, ' '), /message/);
     await processes[0].request('provider_error');
-    assert.equal(agents.snapshot(id).status, 'failed');
+    assert.equal(agents.snapshot(id).status, 'stopped');
     assert.match(agents.read(id), /provider unavailable/);
-    assert.equal(notices[0].status, 'failed');
+    assert.equal(notices[0].outcome, 'failed');
     await agents.send(id, 'x'.repeat(20000));
     await processes[0].request('finish'); await processes[0].request('settle');
     assert.ok(agents.read(id).length < 9000);
     assert.match(agents.read(id), /truncated/);
-    assert.match(agents.read(id), /retained: transcript in memory; subagent stop releases any live child process/, 'the retention reminder survives truncation');
+    assert.match(agents.read(id), /stopped: transcript retained; send continues this child; subagent remove releases the process and transcript/, 'the retention reminder survives truncation');
     await agents.stop(id);
-    await assert.rejects(agents.send(id, 'follow up'), /stopped/);
+    await agents.send(id, 'follow up');
+    await processes[0].request('finish'); await processes[0].request('settle');
+    assert.equal(agents.status(id), 'stopped');
     const crashed = agents.spawn('crash', invocation);
-    await until(() => agents.snapshot(crashed).status === 'failed');
+    await until(() => agents.snapshot(crashed).status === 'stopped');
     assert.match(agents.read(crashed), /useful crash diagnostic/);
   } finally { await agents.shutdown(); }
 });
@@ -185,7 +198,7 @@ test('historical completed tools do not crowd current activity out of a read', (
     result: { content: [{ type: 'text', text: `old output ${i}` }] },
   }]));
   tools.current = { id: 'current', name: 'bash', args: { command: 'now' }, running: false, result: { content: [{ type: 'text', text: 'CURRENT OUTPUT' }] } };
-  const snapshot: any = { status: 'running', messages, tools };
+  const snapshot: any = { status: 'active', messages, tools };
   const text = transcript(snapshot);
   assert.match(text, /tool bash: CURRENT OUTPUT/);
   assert.ok(!text.includes('old output 0'), 'authoritative historical tools are not replayed as activity');
@@ -195,7 +208,7 @@ test('live activity survives many completed parallel siblings in a bounded read'
   const { agents, processes } = setup();
   try {
     const id = agents.spawn('many parallel tools', invocation);
-    await until(() => agents.snapshot(id).status === 'running');
+    await until(() => agents.snapshot(id).status === 'active');
     await processes[0].request('manyparallel');
     await until(() => !!agents.snapshot(id).tools.live?.result);
     const text = agents.read(id);
@@ -208,7 +221,7 @@ test('a control string split across messages stays hidden in read', async () => 
   const { agents, processes } = setup();
   try {
     const id = agents.spawn('split messages', invocation);
-    await until(() => agents.snapshot(id).status === 'running');
+    await until(() => agents.snapshot(id).status === 'active');
     await processes[0].request('splitmessages');
     await until(() => agents.snapshot(id).messages.length >= 2);
     const text = agents.read(id);
@@ -221,13 +234,13 @@ test('a follow-up that starts as the previous turn settles stays running', async
   const { agents, processes } = setup();
   try {
     const id = agents.spawn('stale settlement', invocation);
-    await until(() => agents.status(id) === 'running');
+    await until(() => agents.status(id) === 'active');
     await processes[0].request('finish');
     await processes[0].request('settle');
-    await until(() => agents.status(id) === 'finished');
+    await until(() => agents.status(id) === 'stopped');
     await agents.send(id, 'stale-settle');
     await until(() => String(JSON.stringify(agents.snapshot(id).tools.t1?.result)).includes('live output'));
-    assert.equal(agents.status(id), 'running', 'the new turn is authoritative once it starts');
+    assert.equal(agents.status(id), 'active', 'the new turn is authoritative once it starts');
     const current = agents.read(id); assert.match(current, /live output/, current);
   } finally { await agents.shutdown(); }
 });
@@ -236,9 +249,9 @@ test('a stopped child keeps a long settled result beyond the transcript preview'
   const { agents, processes } = setup();
   try {
     const id = agents.spawn('long finish', invocation);
-    await until(() => agents.status(id) === 'running');
+    await until(() => agents.status(id) === 'active');
     await processes[0].request('longfinish');
-    await until(() => agents.status(id) === 'finished');
+    await until(() => agents.status(id) === 'stopped');
     await agents.stop(id);
     assert.match(agents.read(id), /TAIL_MARKER/, 'stop must not reduce the settled result to the 500-char preview');
   } finally { await agents.shutdown(); }
@@ -248,12 +261,12 @@ test('a send that dies before starting does not expose the previous result', asy
   const { agents, processes } = setup();
   try {
     const id = agents.spawn('old answer', invocation);
-    await until(() => agents.status(id) === 'running');
+    await until(() => agents.status(id) === 'active');
     await processes[0].request('result');
-    await until(() => agents.status(id) === 'finished');
+    await until(() => agents.status(id) === 'stopped');
     assert.match(agents.read(id), /CLEAN/, 'the previous answer is readable first');
     await agents.send(id, 'crashbeforestart');
-    await until(() => agents.status(id) === 'failed');
+    await until(() => agents.status(id) === 'stopped');
     const failed = agents.read(id); assert.equal((failed.match(/CLEAN/g) ?? []).length, 1, failed);
   } finally { await agents.shutdown(); }
 });
@@ -262,12 +275,12 @@ test('a fast settlement is not overwritten by the prompt acknowledgement', async
   const { agents, processes } = setup();
   try {
     const id = agents.spawn('fast settlement', invocation);
-    await until(() => agents.status(id) === 'running');
+    await until(() => agents.status(id) === 'active');
     await processes[0].request('finish');
     await processes[0].request('settle');
-    await until(() => agents.status(id) === 'finished');
+    await until(() => agents.status(id) === 'stopped');
     await agents.send(id, 'fastsettle');
-    assert.equal(agents.status(id), 'finished', 'the settlement arrived before send resumed');
+    assert.equal(agents.status(id), 'stopped', 'the settlement arrived before send resumed');
     assert.match(agents.read(id), /FAST_DONE/);
   } finally { await agents.shutdown(); }
 });
@@ -276,12 +289,12 @@ test('overlapping rejected sends keep the retained answer', async () => {
   const { agents, processes } = setup();
   try {
     const id = agents.spawn('retained answer', invocation);
-    await until(() => agents.status(id) === 'running');
+    await until(() => agents.status(id) === 'active');
     await processes[0].request('result');
-    await until(() => agents.status(id) === 'finished');
+    await until(() => agents.status(id) === 'stopped');
     const results = await Promise.allSettled([agents.send(id, 'reject'), agents.send(id, 'reject')]);
     assert.ok(results.every(result => result.status === 'rejected'), 'both sends are rejected');
-    assert.equal(agents.status(id), 'finished');
+    assert.equal(agents.status(id), 'stopped');
     assert.match(agents.read(id), /CLEAN/, 'a rejected send does not erase the retained result');
   } finally { await agents.shutdown(); }
 });
@@ -290,9 +303,9 @@ test('failed reads retain a result longer than the transcript preview', async ()
   const { agents, processes } = setup();
   try {
     const id = agents.spawn('long failure', invocation);
-    await until(() => agents.status(id) === 'running');
+    await until(() => agents.status(id) === 'active');
     await processes[0].request('longfail');
-    await until(() => agents.status(id) === 'failed');
+    await until(() => agents.status(id) === 'stopped');
     assert.match(agents.read(id), /TAIL_MARKER/, 'the full failed result survives the 500-char preview clip');
   } finally { await agents.shutdown(); }
 });
@@ -301,7 +314,7 @@ test('a transport failure retains a long partial answer beyond the preview', asy
   const { agents } = setup();
   try {
     const id = agents.spawn('crashlong', invocation);
-    await until(() => agents.status(id) === 'failed');
+    await until(() => agents.status(id) === 'stopped');
     assert.match(agents.read(id), /TAIL_MARKER/, 'the full interrupted answer survives the 500-char preview clip');
   } finally { await agents.shutdown(); }
 });
@@ -310,10 +323,10 @@ test('a transport failure keeps the partial streaming answer readable', async ()
   const { agents } = setup();
   try {
     const id = agents.spawn('crashstream', invocation);
-    await until(() => agents.status(id) === 'failed');
+    await until(() => agents.status(id) === 'stopped');
     const text = agents.read(id);
     assert.match(text, /PARTIAL ANSWER/);
-    assert.match(text, /failed: transcript retained/);
+    assert.match(text, /stopped: process gone; transcript retained until subagent remove/);
   } finally { await agents.shutdown(); }
 });
 
@@ -321,14 +334,14 @@ test('thinking participates in sanitizer state without being returned', async ()
   const { agents, processes } = setup();
   try {
     const id = agents.spawn('thinking split', invocation);
-    await until(() => agents.snapshot(id).status === 'running');
+    await until(() => agents.snapshot(id).status === 'active');
     await processes[0].request('thinkingsplit');
     await until(() => agents.snapshot(id).messages.length >= 1);
     const running = agents.read(id);
     assert.match(running, /AFTER/);
     assert.ok(!running.includes('SECRET'), 'running read hides a payload opened in thinking');
     await processes[0].request('settle');
-    await until(() => agents.status(id) === 'finished');
+    await until(() => agents.status(id) === 'stopped');
     const settled = agents.read(id);
     assert.match(settled, /AFTER/);
     assert.ok(!settled.includes('SECRET'), 'settled read hides a payload opened in thinking');
@@ -343,7 +356,7 @@ test('interrupted thinking carries sanitizer state into the stopped transcript',
   const { agents, processes } = setup();
   try {
     const id = agents.spawn('interrupted thinking', invocation);
-    await until(() => agents.snapshot(id).status === 'running');
+    await until(() => agents.snapshot(id).status === 'active');
     await processes[0].request('interruptthinking');
     await until(() => agents.snapshot(id).streaming?.content?.length >= 2);
     await agents.stop(id);
@@ -357,17 +370,17 @@ test('historical diagnostics are processed in message order for read', async () 
   const first = setup();
   try {
     const id = first.agents.spawn('diagnostic recover', invocation);
-    await until(() => first.agents.snapshot(id).status === 'running');
+    await until(() => first.agents.snapshot(id).status === 'active');
     await first.processes[0].request('diagnosticrecover');
-    await until(() => first.agents.status(id) === 'finished');
+    await until(() => first.agents.status(id) === 'stopped');
     assert.match(first.agents.read(id), /NORMAL_RESULT/, 'the retry is not hidden by an earlier unclosed control string');
   } finally { await first.agents.shutdown(); }
   const second = setup();
   try {
     const id = second.agents.spawn('diagnostic pair', invocation);
-    await until(() => second.agents.snapshot(id).status === 'running');
+    await until(() => second.agents.snapshot(id).status === 'active');
     await second.processes[0].request('diagnosticpair');
-    await until(() => second.agents.status(id) === 'failed');
+    await until(() => second.agents.status(id) === 'stopped');
     const text = second.agents.read(id);
     assert.match(text, /AFTER/);
     assert.ok(!text.includes('SECRET'), 'an earlier diagnostic cannot expose a later diagnostic payload');
@@ -378,9 +391,9 @@ test('failed diagnostics keep the message sanitizer state and ids are sanitized 
   const { agents, processes } = setup();
   try {
     const id = agents.spawn('failed split', invocation);
-    await until(() => agents.snapshot(id).status === 'running');
+    await until(() => agents.snapshot(id).status === 'active');
     await processes[0].request('failsplit');
-    await until(() => agents.status(id) === 'failed');
+    await until(() => agents.status(id) === 'stopped');
     const text = agents.read(id);
     assert.match(text, /AFTER/);
     assert.ok(!text.includes('SECRET'), 'failed diagnostics continue the sanitizer state');
@@ -395,9 +408,9 @@ test('settled and stopped results keep the message sanitizer state', async () =>
   const { agents, processes } = setup();
   try {
     const id = agents.spawn('settled split', invocation);
-    await until(() => agents.snapshot(id).status === 'running');
+    await until(() => agents.snapshot(id).status === 'active');
     await processes[0].request('settlesplit');
-    await until(() => agents.status(id) === 'finished');
+    await until(() => agents.status(id) === 'stopped');
     const settled = agents.read(id);
     assert.match(settled, /AFTER/);
     assert.ok(!settled.includes('SECRET'), 'settlement does not reset control-string state');
@@ -412,7 +425,7 @@ test('a stopped child keeps split interrupted text sanitized', async () => {
   const { agents, processes } = setup();
   try {
     const id = agents.spawn('interrupted split', invocation);
-    await until(() => agents.snapshot(id).status === 'running');
+    await until(() => agents.snapshot(id).status === 'active');
     await processes[0].request('interruptsplit');
     await until(() => agents.snapshot(id).streaming !== undefined);
     await agents.stop(id);
@@ -426,13 +439,13 @@ test('a rejected send sanitizes the child RPC error', async () => {
   const { agents } = setup();
   try {
     const id = agents.spawn('reject me', invocation);
-    await until(() => agents.snapshot(id).status === 'running');
+    await until(() => agents.snapshot(id).status === 'active');
     await assert.rejects(agents.send(id, 'reject-inject'), (error: Error) => {
       assert.ok(!error.message.includes('SECRET'), 'the OSC payload is not exposed');
       assert.ok(!error.message.includes('\x9d'), 'the C1 introducer is removed');
       return true;
     });
-    assert.equal(agents.status(id), 'running', 'a rejected input does not fail the child');
+    assert.equal(agents.status(id), 'active', 'a rejected input does not fail the child');
   } finally { await agents.shutdown(); }
 });
 
@@ -440,7 +453,7 @@ test('a completed parallel tool stays readable before its toolResult arrives', a
   const { agents, processes } = setup();
   try {
     const id = agents.spawn('parallel tools', invocation);
-    await until(() => agents.snapshot(id).status === 'running');
+    await until(() => agents.snapshot(id).status === 'active');
     await processes[0].request('parallel');
     await until(() => !!agents.snapshot(id).tools.p1?.result && !!agents.snapshot(id).tools.p2?.result);
     assert.match(agents.read(id), /tool bash: fast output/, 'finished sibling is visible without a toolResult message');
@@ -457,7 +470,7 @@ test('stopping keeps recent output readable, including a partial answer', async 
   const { agents, processes, notices } = setup();
   try {
     const id = agents.spawn('stop me', invocation);
-    await until(() => agents.snapshot(id).status === 'running');
+    await until(() => agents.snapshot(id).messages.some(m => m.role === 'user'));
     await processes[0].request('stream');
     await until(() => agents.snapshot(id).streaming?.content?.[0]?.text === 'authoritative text');
     await agents.stop(id);
@@ -467,17 +480,135 @@ test('stopping keeps recent output readable, including a partial answer', async 
     assert.match(partial, /assistant \(interrupted\): authoritative text/);
     assert.match(partial, /tool bash \(interrupted\): .*live output/s);
     assert.match(partial, /\[Stopped before tool completed\.\]/);
-    assert.match(partial, /stopped: transcript retained in memory until parent shutdown/);
+    assert.match(partial, /stopped: transcript retained; send continues this child; subagent remove releases the process and transcript/);
     await agents.stop(id);
     assert.match(agents.read(id), /assistant \(interrupted\): authoritative text/, 'repeated stop keeps the partial answer');
     const second = agents.spawn('finished but not settled', invocation);
-    await until(() => agents.snapshot(second).status === 'running');
+    await until(() => agents.snapshot(second).status === 'active');
     await processes[1].request('finish');
     await agents.stop(second);
     assert.match(agents.read(second), /tool bash: done/);
     assert.match(agents.read(second), /SECRET RESULT/);
     assert.equal(agents.read(second).match(/SECRET RESULT/g)?.length, 1, 'the stopped answer is shown exactly once');
     assert.equal(notices.length, 0, 'stop never emits completion');
+  } finally { await agents.shutdown(); }
+});
+
+test('stop ordered behind a queued send still aborts it', async () => {
+  const { agents } = setup();
+  try {
+    const id = agents.spawn('queued send task', invocation);
+    await until(() => agents.snapshot(id).messages.some(m => m.role === 'user'));
+    const sending = agents.send(id, 'queued follow-up');
+    const stopping = agents.stop(id);
+    await Promise.allSettled([sending, stopping]);
+    assert.equal(agents.status(id), 'stopped');
+    assert.doesNotMatch(agents.read(id), /\(streaming\)/, 'the accepted turn did not survive stop');
+  } finally { await agents.shutdown(); }
+});
+
+test('transport failure while steering keeps the partial answer', async () => {
+  const { agents, processes } = setup();
+  try {
+    const id = agents.spawn('busystream', invocation);
+    await until(() => agents.snapshot(id).streaming?.content?.[0]?.text === 'PARTIAL STEER ANSWER');
+    await agents.send(id, 'steer correction');
+    processes[0].request('crash-now').catch(() => {});
+    await until(() => agents.status(id) === 'stopped');
+    const text = agents.read(id);
+    assert.match(text, /PARTIAL STEER ANSWER/, 'steering did not make the failure discard partial output');
+    assert.match(text, /process gone/);
+  } finally { await agents.shutdown(); }
+});
+
+test('stop aborts the current turn and send resumes the same live process', async () => {
+  const { agents, processes, notices } = setup();
+  try {
+    const id = agents.spawn('resume task', invocation);
+    await until(() => agents.snapshot(id).messages.some(m => m.role === 'user'));
+    await processes[0].request('stream');
+    await until(() => agents.snapshot(id).streaming?.content?.[0]?.text === 'authoritative text');
+    await agents.stop(id);
+    assert.equal(agents.status(id), 'stopped');
+    assert.match(agents.read(id), /user: resume task/);
+    assert.match(agents.read(id), /assistant \(interrupted\): authoritative text/);
+    assert.equal(processes.length, 1, 'stop keeps the child process');
+    await agents.send(id, 'resume after stop');
+    await until(() => agents.snapshot(id).messages.some(m => m.role === 'user' && m.content === 'resume after stop'));
+    assert.equal(agents.status(id), 'active');
+    assert.equal(processes.length, 1, 'the same process handles the follow-up');
+    await processes[0].request('finish');
+    await processes[0].request('settle');
+    await until(() => agents.status(id) === 'stopped');
+    assert.match(agents.read(id), /resume after stop/);
+    assert.equal(notices.filter(n => n.outcome === 'finished').length, 1, 'only the natural turn reports; explicit stop is silent');
+  } finally { await agents.shutdown(); }
+});
+
+test('stop clears queued steering before aborting', async () => {
+  const { agents, processes } = setup();
+  try {
+    const id = agents.spawn('busystream', invocation);
+    await until(() => agents.snapshot(id).streaming?.content?.[0]?.text === 'PARTIAL STEER ANSWER');
+    await agents.send(id, 'queued steer');
+    await agents.stop(id);
+    const log = await processes[0].request('command-log');
+    assert.deepEqual(log.discarded, ['queued steer'], 'clear_queue discarded the accepted steer');
+    assert.deepEqual(log.commands.slice(-2), ['clear_queue', 'abort']);
+  } finally { await agents.shutdown(); }
+});
+
+test('remove cancels queued notices and reminders', async () => {
+  const reminders: string[] = [];
+  const notices: string[] = [];
+  const { agents } = setup({
+    cancelReminder: id => reminders.push(id),
+    cancelNotices: id => notices.push(id),
+  });
+  try {
+    const id = agents.spawn('remove cleanup', invocation);
+    await until(() => agents.snapshot(id).messages.some(m => m.role === 'user'));
+    await agents.remove(id);
+    assert.deepEqual(reminders, [id]);
+    assert.deepEqual(notices, [id]);
+  } finally { await agents.shutdown(); }
+});
+
+test('remove deletes the transcript, releases the process and frees the id', async () => {
+  const { agents, processes } = setup();
+  try {
+    const id = agents.spawn('remove task', invocation);
+    await until(() => agents.snapshot(id).messages.some(m => m.role === 'user'));
+    await agents.remove(id);
+    assert.deepEqual(agents.list(), []);
+    assert.throws(() => agents.read(id), /Unknown subagent/);
+    await assert.rejects(processes[0].request('get_state'), /stopped/i);
+  } finally { await agents.shutdown(); }
+});
+
+test('process death after settlement does not send a second failure notice', async () => {
+  const { agents, processes, notices } = setup();
+  try {
+    const id = agents.spawn('settle then die', invocation);
+    await until(() => agents.snapshot(id).messages.some(m => m.role === 'user'));
+    await processes[0].request('finish');
+    await processes[0].request('settle');
+    await until(() => agents.status(id) === 'stopped');
+    assert.deepEqual(notices.map(n => n.outcome), ['finished']);
+    processes[0].request('crash-now').catch(() => {});
+    await until(() => agents.read(id).includes('process gone'));
+    assert.deepEqual(notices.map(n => n.outcome), ['finished'], 'an idle process exit does not report a second completion');
+    assert.match(agents.read(id), /SECRET RESULT/);
+  } finally { await agents.shutdown(); }
+});
+
+test('a dead stopped child stays readable and send explains how to recover', async () => {
+  const { agents } = setup();
+  try {
+    const id = agents.spawn('crashbeforestart', invocation);
+    await until(() => agents.status(id) === 'stopped');
+    assert.match(agents.read(id), /process gone/);
+    await assert.rejects(agents.send(id, 'retry'), /process is gone.*remove/i);
   } finally { await agents.shutdown(); }
 });
 
@@ -491,12 +622,12 @@ test('long-running children get reminders until settlement or stop', async () =>
   });
   try {
     const id = agents.spawn('slow task', invocation);
-    await until(() => agents.snapshot(id).status === 'running');
+    await until(() => agents.snapshot(id).status === 'active');
     await until(() => reminders.length >= 2);
     assert.ok(reminders.every(r => r.id === id && r.minutes >= 1));
 
     await processes[0].request('result');
-    assert.equal(agents.snapshot(id).status, 'finished');
+    assert.equal(agents.snapshot(id).status, 'stopped');
     const settled = reminders.length;
     await new Promise(r => setTimeout(r, 60));
     assert.equal(reminders.length, settled, 'settled child stops reminders');
@@ -535,17 +666,17 @@ test('a child whose process cannot be constructed is never retained', async () =
 test('a synchronous failure from a factory that still returns a process is delivered after launch', async () => {
   const notices: any[] = [];
   const observed: string[][] = [];
-  const agents = new Agents((id, status) => notices.push({ id, status }), (_spec, _event, failure) => {
+  const agents = new Agents((id, outcome) => notices.push({ id, outcome }), (_spec, _event, failure) => {
     failure(new Error('spawn failed synchronously'));
     return { request: async () => { throw new Error('unreachable'); }, stop: async () => {} } as any;
   });
   agents.subscribe(() => observed.push(agents.list().map(c => `${c.id} ${c.status}`)));
   const id = agents.spawn('task', invocation);
   assert.match(id, /^j1-[a-z0-9]+$/);
-  assert.deepEqual(observed, [[`${id} failed`]], 'one publication, after launch, with the final state');
-  assert.deepEqual(agents.list().map(c => `${c.id} ${c.status}`), [`${id} failed`]);
+  assert.deepEqual(observed, [[`${id} stopped`]], 'one publication, after launch, with the final state');
+  assert.deepEqual(agents.list().map(c => `${c.id} ${c.status}`), [`${id} stopped`]);
   await until(() => notices.length === 1);
-  assert.deepEqual(notices, [{ id, status: 'failed' }]);
+  assert.deepEqual(notices, [{ id, outcome: 'failed' }]);
   assert.match(agents.read(id), /spawn failed synchronously/);
   await agents.shutdown();
 });
@@ -592,7 +723,7 @@ test('a throwing completion notifier does not invalidate a retained child', asyn
   });
   const id = agents.spawn('task', invocation);
   assert.match(id, /^j1-[a-z0-9]+$/);
-  assert.deepEqual(agents.list().map(c => `${c.id} ${c.status}`), [`${id} failed`]);
+  assert.deepEqual(agents.list().map(c => `${c.id} ${c.status}`), [`${id} stopped`]);
   assert.match(agents.read(id), /spawn failed synchronously/);
   console.error = error;
   assert.match(String(logged.at(-1)), /completion delivery failed/i, 'delivery failure is logged, not silent');
@@ -607,24 +738,24 @@ test('startup never overwrites a synchronous terminal state', async () => {
   });
   const id = agents.spawn('task', invocation);
   await new Promise(r => setTimeout(r, 20));
-  assert.equal(agents.snapshot(id).status, 'failed');
+  assert.equal(agents.snapshot(id).status, 'stopped');
   assert.deepEqual(prompts, [], 'no work submitted for a launch that already failed');
   await agents.shutdown();
 });
 
-test('a settlement queued before stop and delivered after it is ignored', async () => {
+test('a natural settlement delivered after stop is still reported', async () => {
   const notices: any[] = [];
   let deliver: any;
-  const agents = new Agents((id, status) => notices.push({ id, status }), (_spec, event) => {
+  const agents = new Agents((id, outcome) => notices.push({ id, outcome }), (_spec, event) => {
     deliver = event;
     return { request: async () => ({ messages: [] }), stop: async () => {} } as any;
   });
   const id = agents.spawn('task', invocation);
-  await until(() => agents.snapshot(id).status === 'running');
+  await until(() => agents.snapshot(id).status === 'active');
   await agents.stop(id);
   deliver({ type: 'agent_settled' });
   assert.equal(agents.snapshot(id).status, 'stopped');
-  assert.deepEqual(notices, [], 'explicit stop sends no completion');
+  assert.deepEqual(notices, [{ id, outcome: 'finished' }], 'a real result is not hidden by a concurrent stop');
   await agents.shutdown();
 });
 
@@ -632,8 +763,8 @@ test('status is readable without copying history, and labels survive C1 sequence
   const agents = new Agents(() => {});
   try {
     const id = agents.spawn('\u009b31mred\u009b0m task', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
-    assert.equal(agents.status(id), 'starting');
-    await until(() => agents.status(id) === 'running');
+    assert.equal(agents.status(id), 'active');
+    await until(() => agents.status(id) === 'active');
     assert.ok(!/\u009b/.test(agents.list()[0].task), 'C1 CSI cannot reach the viewer');
     assert.throws(() => agents.status('nope'), /Unknown subagent/);
   } finally { await agents.shutdown(); }
@@ -698,18 +829,18 @@ test('preset system append uses a temporary file, overrides tools, and is cleane
     const valid = childInvocation('/tmp', undefined, undefined, { systemAppend: 'SECOND' });
     const secondFile = valid.args[valid.args.indexOf('--append-system-prompt') + 1];
     const id = agents.spawn('preset task', { ...valid, command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() }, 'oracle');
-    await until(() => agents.snapshot(id).status === 'running');
+    await until(() => agents.snapshot(id).model === 'fake-model/fake');
     assert.equal(agents.list()[0].preset, 'oracle');
-    assert.match(agents.read(id), new RegExp(`^${id} running · oracle · fake-model\\/fake`));
+    assert.match(agents.read(id), new RegExp(`^${id} active · oracle · fake-model\\/fake`));
     await processes[0].request('provider_error');
-    await until(() => agents.snapshot(id).status === 'failed');
+    await until(() => agents.snapshot(id).status === 'stopped');
     assert.equal(existsSync(secondFile), false, 'failed settlement removes the prompt file');
     await agents.stop(id);
 
     const stopInvocation = childInvocation('/tmp', undefined, undefined, { systemAppend: 'STOP' });
     const stopFile = stopInvocation.args[stopInvocation.args.indexOf('--append-system-prompt') + 1];
     const stopId = agents.spawn('stop task', { ...stopInvocation, command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() }, 'oracle');
-    await until(() => agents.snapshot(stopId).status === 'running');
+    await until(() => agents.snapshot(stopId).status === 'active');
     await agents.stop(stopId);
     assert.equal(existsSync(stopFile), false, 'stop removes the prompt file');
   } finally { await agents.shutdown(); }

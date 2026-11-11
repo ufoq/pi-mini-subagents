@@ -23,12 +23,13 @@ or a shared blueprint.
 | Resources | Children inherit the parent's tools, skills, templates and themes, but not its extensions. Extensions stay off, which also excludes MCP (implemented as a built-in extension) and our `subagent` tool, so a child cannot delegate. |
 | Presets | Optional user-defined Markdown presets under `~/.pi/agent/subagent-presets/` or a trusted project's `.pi/subagent-presets/`. A preset supplies launch defaults for `model`, `thinking`, `tools` and a preset-only `system_append`; explicit spawn args override matching fields. Preset append is added after the normal `APPEND_SYSTEM.md`. Project trust follows Pi's `isProjectTrusted()` result; the extension adds no second rule. No built-in presets, preset editor, inheritance or auto-routing. Preset tool allowlists are launch configuration, not a sandbox. |
 | Workspace | Same working directory. Parent coordinates assignments in prompts; no writer locks or automatic worktrees. |
-| Steering/follow-up | Send input to the same child using Pi's native prompt/steering behavior. A finished turn does not destroy the conversation. |
+| Steering/follow-up | Send input to the same child using Pi's native prompt/steering behavior. A natural settle or explicit stop leaves the child `stopped` but resumable; only `remove` destroys it. |
 | Observation | Child list, existing messages/tool activity, then live events. Agent and human controls use the same registry. Human viewing adds nothing to parent model context. |
-| Completion | Send only a concise `<system-notification>` that the child finished and its result is available. Include the child id, not the result body. Busy-parent notices are coalesced and delivered at the next message boundary with `steer`; an idle parent is woken after a short burst window. A child that stays `starting`/`running` for 10 minutes emits a notification-only reminder every 10 minutes until it settles or is stopped. Parent retrieves results when needed. |
-| Stop | Direct child stop/termination control, independent of the parent's Escape behavior. |
+| Completion | Send only a concise `<system-notification>` that the child finished and its result is available. Include the child id, not the result body. Busy-parent notices are coalesced and delivered at the next message boundary with `steer`; an idle parent is woken after a short burst window. A child that stays `active` for 10 minutes emits a notification-only reminder every 10 minutes until it settles or is stopped. Parent retrieves results when needed. |
+| Stop / remove | `stop` aborts the current turn with `clear_queue` + `abort`, keeps the process and partial answer, and is resumable with `send`. `remove` kills the process and deletes the transcript/id. Both are independent of parent Escape behavior. |
 | History | A parent keeps its ordinary Pi transcript; children are ephemeral (`--no-session`) and leave nothing on disk. No separate orchestration persistence or recovery. |
-| Cleanup | Basic child-process cleanup when the extension shuts down. No elaborate session/branch handoff machinery. |
+| Capacity | One admission cap of eight registry entries, including `stopped` children. `remove` frees a slot; no queue, eviction, byte cap or scheduler. |
+| Cleanup | `remove` and `session_shutdown` release owned processes; explicit `stop` does not. No elaborate session/branch handoff machinery. |
 
 The notification tag is text inside an ordinary Pi notification/custom message,
 not a new privileged message role. Example:
@@ -49,8 +50,8 @@ result bodies, progress streams or child transcripts into parent context.
 
 ## Explicitly out of v1
 
-- Concurrency limits, admission queues and scheduling: the parent model decides
-  how many workers to start.
+- Admission queues and scheduling: the parent decides what to start within the
+  eight-entry cap; `remove` is the explicit release path.
 - Request/token budgets, wrap-up counters and forced-yield policies.
 - Automatic task deadlines, idle eviction, auto-stop or auto-reassignment. Stop
   is explicit. The 10-minute reminder is notification-only.

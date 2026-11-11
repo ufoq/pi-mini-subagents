@@ -41,20 +41,20 @@ test('one compact tool, actionable validation, exact completion-only delivery an
   await commands[0].handler('', ctx);
   await handlers.get('session_shutdown')({}, ctx);
   assert.equal(sent.length, 0);
-  const content = completionNotification([{ id: 'j1', status: 'failed' }]);
+  const content = completionNotification([{ id: 'j1', outcome: 'failed' }]);
   assert.match(content, /^<system-notification>\nSubagent j1 failed\./);
-  assert.match(content, /subagent stop releases any live child process/);
+  assert.match(content, /subagent remove releases the process and transcript/);
   assert.ok(!content.includes('SECRET RESULT'));
   const reminder = noticeNotification([{ id: 'j1-abc', minutes: 10 }]);
   assert.match(reminder, /has been running for 10 minutes/);
   assert.ok(!reminder.includes('Settled children stay in memory'));
-  assert.equal(startingReply('j1'), 'j1 starting. Parent may continue; completion will notify. Results require read.');
-  assert.match(startingReply('j1', { provider: 'mock', id: 'alias/model' }), /starting on mock\/alias\/model/);
-  assert.match(startingReply('j1', { provider: 'mock', id: 'mock' }, 'oracle'), /^j1 starting \(oracle\) on mock\/mock\./);
-  assert.match(listReply([{ id: 'j1', status: 'finished', task: 'review', preset: 'oracle' }]), /j1 finished \(oracle\): review/);
+  assert.equal(startingReply('j1'), 'j1 active. Parent may continue; completion will notify. Results require read.');
+  assert.match(startingReply('j1', { provider: 'mock', id: 'alias/model' }), /active on mock\/alias\/model/);
+  assert.match(startingReply('j1', { provider: 'mock', id: 'mock' }, 'oracle'), /^j1 active \(oracle\) on mock\/mock\./);
+  assert.match(listReply([{ id: 'j1', status: 'stopped', task: 'review', preset: 'oracle' }]), /j1 stopped \(oracle\): review/);
   assert.ok(!startingReply('j1', { provider: 'p\x1b]52;c;SECRET\x07', id: 'model' }).includes('SECRET'), 'inherited model echo is sanitized');
-  assert.match(listReply([{ id: 'j1', status: 'finished', task: 'review' }]), /subagent stop releases any live child process/);
-  assert.ok(!listReply([{ id: 'j1', status: 'running', task: 'review' }]).includes('subagent stop'));
+  assert.match(listReply([{ id: 'j1', status: 'stopped', task: 'review' }]), /subagent remove releases the process and transcript/);
+  assert.ok(!listReply([{ id: 'j1', status: 'active', task: 'review' }]).includes('subagent remove'));
   assert.equal(listReply([]), 'No subagents.');
   assert.equal(listReply([], 'Presets: none.'), 'No subagents.\nPresets: none.');
   assert.equal(parseModel(undefined), undefined);
@@ -77,7 +77,7 @@ test('completion notices coalesce into one steer message per boundary', async ()
   notifier.add('j2', 'failed');
   assert.deepEqual(batches, []);
   await new Promise(resolve => setTimeout(resolve, 30));
-  assert.deepEqual(batches, [[{ id: 'j1', status: 'finished' }, { id: 'j2', status: 'failed' }]]);
+  assert.deepEqual(batches, [[{ id: 'j1', outcome: 'finished' }, { id: 'j2', outcome: 'failed' }]]);
   // Busy: hold every completion until the turn boundary, then send one message.
   notifier.startRun();
   notifier.add('j3', 'finished');
@@ -85,25 +85,25 @@ test('completion notices coalesce into one steer message per boundary', async ()
   await new Promise(resolve => setTimeout(resolve, 30));
   assert.equal(batches.length, 1, 'busy parent is not interrupted while the turn runs');
   notifier.boundary();
-  assert.deepEqual(batches[1], [{ id: 'j3', status: 'finished' }, { id: 'j4', status: 'finished' }]);
+  assert.deepEqual(batches[1], [{ id: 'j3', outcome: 'finished' }, { id: 'j4', outcome: 'finished' }]);
   // A completion after the last turn boundary is flushed when the run ends.
   notifier.add('j5', 'failed');
   assert.equal(batches.length, 2);
   notifier.endRun();
-  assert.deepEqual(batches[2], [{ id: 'j5', status: 'failed' }]);
+  assert.deepEqual(batches[2], [{ id: 'j5', outcome: 'failed' }]);
   // agent_end is not idle: retry backoff keeps batching until the next run starts.
   notifier.add('j6', 'finished');
   notifier.add('j7', 'finished');
   await new Promise(resolve => setTimeout(resolve, 30));
   assert.equal(batches.length, 3);
   notifier.startRun();
-  assert.deepEqual(batches[3], [{ id: 'j6', status: 'finished' }, { id: 'j7', status: 'finished' }]);
+  assert.deepEqual(batches[3], [{ id: 'j6', outcome: 'finished' }, { id: 'j7', outcome: 'finished' }]);
   // Settlement enables idle batching again.
   notifier.settled();
   notifier.add('j8', 'finished');
   notifier.add('j9', 'failed');
   await new Promise(resolve => setTimeout(resolve, 30));
-  assert.deepEqual(batches[4], [{ id: 'j8', status: 'finished' }, { id: 'j9', status: 'failed' }]);
+  assert.deepEqual(batches[4], [{ id: 'j8', outcome: 'finished' }, { id: 'j9', outcome: 'failed' }]);
   assert.equal(completionNotification(batches[1] as any).match(/<system-notification>/g)?.length, 1);
   notifier.clear();
 });
@@ -111,7 +111,7 @@ test('completion notices coalesce into one steer message per boundary', async ()
 test('completion delivery is one steer message with every finished id', async () => {
   const sent: any[] = [];
   const pi = { sendMessage: (...args: any[]) => sent.push(args) };
-  await sendNotices(pi as any, [{ id: 'j1', status: 'finished' }, { id: 'j2', status: 'failed' }]);
+  await sendNotices(pi as any, [{ id: 'j1', outcome: 'finished' }, { id: 'j2', outcome: 'failed' }]);
   assert.equal(sent.length, 1);
   const [message, options] = sent[0];
   assert.equal(message.customType, 'mini-subagent-notice');
@@ -136,7 +136,7 @@ test('reminders coalesce per child and share message boundaries', async () => {
   notifier.remind('j1', 30);
   notifier.add('j1', 'finished');
   notifier.boundary();
-  assert.deepEqual(batches[1], [{ id: 'j1', status: 'finished' }], 'completion supersedes a reminder');
+  assert.deepEqual(batches[1], [{ id: 'j1', outcome: 'finished' }], 'completion supersedes a reminder');
 
   notifier.remind('j2', 40);
   notifier.cancel('j2');
@@ -146,9 +146,22 @@ test('reminders coalesce per child and share message boundaries', async () => {
   notifier.remind('j3', 10);
   notifier.add('j4', 'failed');
   notifier.boundary();
-  assert.deepEqual(batches[2], [{ id: 'j4', status: 'failed' }, { id: 'j3', minutes: 10 }]);
+  assert.deepEqual(batches[2], [{ id: 'j4', outcome: 'failed' }, { id: 'j3', minutes: 10 }]);
   assert.match(noticeNotification(batches[2] as any), /Subagent j3 has been running for 10 minutes/);
-  assert.match(noticeNotification(batches[2] as any), /Settled children stay in memory/);
+  assert.match(noticeNotification(batches[2] as any), /Stopped children stay readable/);
+  notifier.clear();
+});
+
+test('drop removes both a queued completion and reminder for a removed child', async () => {
+  const batches: any[][] = [];
+  const notifier = createCompletionNotifier(batch => batches.push(batch), 10);
+  notifier.startRun();
+  notifier.add('j1', 'finished');
+  notifier.remind('j1', 10);
+  notifier.add('j2', 'failed');
+  notifier.drop('j1');
+  notifier.boundary();
+  assert.deepEqual(batches, [[{ id: 'j2', outcome: 'failed' }]], 'drop leaves other children unaffected');
   notifier.clear();
 });
 
@@ -239,6 +252,21 @@ test('viewer lists newest subagents first', async () => {
   } finally { viewer.dispose(); await agents.shutdown(); }
 });
 
+test('viewer falls back safely when the selected child is removed', async () => {
+  const agents = new Agents(() => {});
+  const id = agents.spawn('removable task', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
+  const theme = { fg: (_: string, s: string) => s, bg: (_: string, s: string) => s, bold: (s: string) => s };
+  const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 24 } }, theme, () => {}, process.cwd(), id);
+  try {
+    assert.match(viewer.render(80).join('\n'), new RegExp(id));
+    await agents.remove(id);
+    const lines = viewer.render(80).join('\n');
+    assert.doesNotMatch(lines, new RegExp(id), 'the removed child disappears');
+    assert.match(lines, /No children/i, 'the viewer returns to the empty list');
+    viewer.handleInput('\r');
+  } finally { viewer.dispose(); await agents.shutdown(); }
+});
+
 test('viewer shows the preset on a child in both list and detail views', async () => {
   const agents = new Agents(() => {});
   const id = agents.spawn('preset task', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() }, 'oracle');
@@ -280,20 +308,21 @@ test('viewer keeps its cursor, states input intent and fits narrow hints', async
     const row = viewer.render(40).find((line: string) => line.includes('\x1b[48;5;24m'));
     const highlight = /\x1b\[48;5;24m([\s\S]*?)\x1b\[0m/.exec(row!)?.[1] ?? '';
     assert.equal(visibleWidth(highlight), 36, 'highlight spans border-padded inner width');
-    // Finished children get a new-turn label; stopped ones accept no typing.
-    await wait(() => agents.snapshot(first).status === 'running');
+    // Finished children get a new-turn label; stopped children accept a new turn.
+    await wait(() => agents.snapshot(first).status === 'active');
     const rpc = (agents as any).children.get(first).rpc;
     await rpc.request('finish'); await rpc.request('settle');
-    await wait(() => agents.snapshot(first).status === 'finished');
+    await wait(() => agents.snapshot(first).status === 'stopped');
     viewer.handleInput('\r');
     assert.match(viewer.render(60).join('\n'), /Enter→new turn/, 'finished child starts a new turn');
     await agents.stop(first);
-    assert.match(viewer.render(60).join('\n'), /Stopped/);
+    assert.match(viewer.render(60).join('\n'), /Enter→new turn/);
     const before = agents.snapshot(first).messages.length;
-    viewer.handleInput('should not be typed');
-    assert.equal(viewer.input.getValue(), '', 'a stopped child never receives keystrokes');
-    viewer.input.setValue('should not be sent'); viewer.handleInput('\r');
-    assert.equal(agents.snapshot(first).messages.length, before, 'a stopped child submits nothing');
+    viewer.handleInput('accepted after stop');
+    assert.equal(viewer.input.getValue(), 'accepted after stop', 'a stopped child accepts input');
+    viewer.handleInput('\r');
+    await wait(() => agents.snapshot(first).messages.length > before);
+    assert.ok(agents.snapshot(first).messages.length > before, 'a stopped child starts a new turn');
     // Exactly one row carries the selection background.
     viewer.handleInput('\u001b');
     assert.equal((viewer.render(40).join('\n').match(/\x1b\[48;5;24m/g) ?? []).length, 1);
@@ -339,7 +368,7 @@ test('viewer keeps the input visible on short terminals and highlights truncated
   };
   const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 24 } }, ansi, () => {}, process.cwd(), id);
   try {
-    await wait(() => agents.snapshot(id).status === 'running');
+    await wait(() => agents.snapshot(id).status === 'active');
     // Truncated row: the ellipsis and the padding after it stay highlighted.
     viewer.handleInput('\u001b'); // back to the list
     const list = viewer.render(40);
@@ -361,7 +390,7 @@ test('viewer keeps the input visible on short terminals and highlights truncated
     for (const ch of 'draft') viewer.handleInput(ch);
     const rpc = (agents as any).children.get(id).rpc;
     await rpc.request('finish'); await rpc.request('settle');
-    await wait(() => agents.snapshot(id).status === 'finished');
+    await wait(() => agents.snapshot(id).status === 'stopped');
     viewer.render(80);
     viewer.handleInput('X');
     assert.equal(viewer.input.getValue(), 'draftX', `draft keeps its cursor position across relabel, got ${JSON.stringify(viewer.input.getValue())}`);
@@ -378,7 +407,7 @@ test('viewer never hides intent behind status text or tiny heights, and drops st
   };
   const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 24 } }, plain, () => {}, process.cwd(), id);
   try {
-    await wait(() => agents.status(id) === 'running');
+    await wait(() => agents.status(id) === 'active');
     viewer.focused = true;
     // Guidance is not masked by transient feedback.
     viewer.status = 'Input accepted by j1.';
@@ -393,8 +422,8 @@ test('viewer never hides intent behind status text or tiny heights, and drops st
       short.handleInput('\u0018'); // Ctrl+X -> stop
       await wait(() => agents.status(id) === 'stopped');
       const stopped = short.render(80).join('\n');
-      assert.match(stopped, /Stopped/, 'stopped state is visible');
-      assert.equal(short.input.focused, false, 'a stopped child drops input focus');
+      assert.match(stopped, /stopped/, 'stopped state is visible');
+      assert.equal(short.input.focused, true, 'a stopped child keeps input focus');
     } finally { short.dispose(); }
     // A tagged composer reserves its prefix width, so a long draft still scrolls,
     // keeps its caret marker, and is never truncated after being rendered.
@@ -428,9 +457,9 @@ test('viewer never hides intent behind status text or tiny heights, and drops st
       const failing = agents.spawn('failing task', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
       const narrow: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 24 } }, plain, () => {}, process.cwd(), failing);
       try {
-        await wait(() => agents.status(failing) === 'running');
+        await wait(() => agents.status(failing) === 'active');
         await (agents as any).children.get(failing).rpc.request('provider_error');
-        await wait(() => agents.status(failing) === 'failed');
+        await wait(() => agents.status(failing) === 'stopped');
         const line = narrow.render(20).join('\n').replace(/\x1b\[[0-9;]*m/g, '');
         assert.match(line, /provider/, 'the diagnostic is not crowded out by the intent');
         assert.match(line, /turn/, 'the intent is still stated');
@@ -532,12 +561,12 @@ test('the stopped viewer keeps interrupted text that read clips', async () => {
     assert.fail('condition not reached');
   };
   try {
-    await wait(() => agents.status(id) === 'running');
+    await wait(() => agents.status(id) === 'active');
     await (agents as any).children.get(id).rpc.request('long');
     await wait(() => agents.snapshot(id).streaming !== undefined);
     await agents.stop(id);
     assert.match(viewer.render(120).join('\n'), /TAIL_MARKER/, 'the viewer shows the full interrupted answer');
-    assert.ok(!agents.read(id).includes('TAIL_MARKER'), 'read keeps its per-item clip');
+    assert.match(agents.read(id), /TAIL_MARKER/, 'read shows the full interrupted answer');
   } finally { viewer.dispose(); await agents.shutdown(); }
 });
 
@@ -551,7 +580,7 @@ test('the stopped viewer carries sanitizer state into interrupted output', async
     assert.fail('condition not reached');
   };
   try {
-    await wait(() => agents.status(id) === 'running');
+    await wait(() => agents.status(id) === 'active');
     await (agents as any).children.get(id).rpc.request('interruptsplit');
     await wait(() => agents.snapshot(id).streaming !== undefined);
     await agents.stop(id);
@@ -571,7 +600,7 @@ test('a completed tool result already sanitized in messages is not scanned twice
     assert.fail('condition not reached');
   };
   try {
-    await wait(() => agents.status(id) === 'running');
+    await wait(() => agents.status(id) === 'active');
     await (agents as any).children.get(id).rpc.request('resultmessage');
     await wait(() => agents.snapshot(id).messages.some(m => m.role === 'toolResult'));
     const detail = viewer.render(120).join('\n');
@@ -589,14 +618,14 @@ test('viewer thinking state survives running, settled and stopped reads', async 
     assert.fail('condition not reached');
   };
   try {
-    await wait(() => agents.status(id) === 'running');
+    await wait(() => agents.status(id) === 'active');
     await (agents as any).children.get(id).rpc.request('thinkingsplit');
     await wait(() => agents.snapshot(id).messages.length >= 1);
     let detail = viewer.render(120).join('\n');
     assert.match(detail, /AFTER/);
     assert.ok(!detail.includes('SECRET'), 'running viewer hides a payload opened in thinking');
     await (agents as any).children.get(id).rpc.request('settle');
-    await wait(() => agents.status(id) === 'finished');
+    await wait(() => agents.status(id) === 'stopped');
     detail = viewer.render(120).join('\n');
     assert.match(detail, /AFTER/);
     assert.ok(!detail.includes('SECRET'), 'settled viewer hides a payload opened in thinking');
@@ -617,7 +646,7 @@ test('viewer interrupted thinking and result metadata share sanitizer state', as
   const id = agents.spawn('interrupted thinking', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
   const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 40 } }, plainTheme, () => {}, process.cwd(), id);
   try {
-    await wait(() => agents.status(id) === 'running');
+    await wait(() => agents.status(id) === 'active');
     await (agents as any).children.get(id).rpc.request('interruptthinking');
     await wait(() => agents.snapshot(id).streaming?.content?.length >= 2);
     await agents.stop(id);
@@ -629,7 +658,7 @@ test('viewer interrupted thinking and result metadata share sanitizer state', as
     const other = second.spawn('metadata result', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
     const otherViewer: any = new AgentViewer(second, { requestRender() {}, terminal: { rows: 40 } }, plainTheme, () => {}, process.cwd(), other);
     try {
-      await wait(() => second.status(other) === 'running');
+      await wait(() => second.status(other) === 'active');
       await (second as any).children.get(other).rpc.request('metadataresult');
       await wait(() => second.snapshot(other).messages.some(m => m.role === 'toolResult' && m.toolCallId === 'm1'));
       detail = otherViewer.render(120).join('\n');
@@ -650,9 +679,9 @@ test('failed diagnostics in the message and status line keep sanitizer state', a
     assert.fail('condition not reached');
   };
   try {
-    await wait(() => agents.status(id) === 'running');
+    await wait(() => agents.status(id) === 'active');
     await (agents as any).children.get(id).rpc.request('failsplit');
-    await wait(() => agents.status(id) === 'failed');
+    await wait(() => agents.status(id) === 'stopped');
     const detail = viewer.render(120).join('\n');
     assert.match(detail, /AFTER/);
     assert.match(detail, /Error: AFTER/);
@@ -670,7 +699,7 @@ test('a partial tool-call preview never shows encoded control payloads', async (
     assert.fail('condition not reached');
   };
   try {
-    await wait(() => agents.status(id) === 'running');
+    await wait(() => agents.status(id) === 'active');
     await (agents as any).children.get(id).rpc.request('partialinject');
     await wait(() => !!agents.snapshot(id).streaming);
     const detail = viewer.render(120).join('\n');
@@ -689,7 +718,7 @@ test('an unexecuted partial call does not consume a later reused id result', asy
     assert.fail('condition not reached');
   };
   try {
-    await wait(() => agents.status(id) === 'running');
+    await wait(() => agents.status(id) === 'active');
     await (agents as any).children.get(id).rpc.request('unexecuted');
     await wait(() => agents.snapshot(id).messages.some(m => m.role === 'toolResult' && m.toolCallId === 'u1'));
     const detail = viewer.render(120).join('\n');
@@ -708,12 +737,13 @@ test('the viewer shows a reused tool id as a new occurrence', async () => {
     assert.fail('condition not reached');
   };
   try {
-    await wait(() => agents.status(id) === 'running');
+    await wait(() => agents.status(id) === 'active' && agents.snapshot(id).messages.some(m => m.role === 'user') && !!agents.snapshot(id).tools.t1);
     await (agents as any).children.get(id).rpc.request('finish');
     await (agents as any).children.get(id).rpc.request('settle');
-    await wait(() => agents.status(id) === 'finished');
+    await wait(() => agents.status(id) === 'stopped');
     await agents.send(id, 'again');
-    await wait(() => agents.snapshot(id).tools.t1?.running === true);
+    await wait(() => agents.snapshot(id).messages.some(m => m.role === 'user' && m.content === 'again'));
+    await wait(() => agents.snapshot(id).tools.t1?.running === true && agents.snapshot(id).tools.t1?.args?.command === 'second');
     const detail = viewer.render(120).join('\n');
     assert.match(detail, /example/, 'the old call keeps its own argument');
     assert.match(detail, /second/, 'the new call shows its own argument');
@@ -733,7 +763,7 @@ test('viewer sanitizes child text, arguments and results before rendering', asyn
   try {
     await mkdir('tmp', { recursive: true });
     await writeFile('tmp/preview-inject.txt', 'a\n\x1b[2JFILE_PAYLOAD\n');
-    await wait(() => agents.status(id) === 'running');
+    await wait(() => agents.status(id) === 'active');
     await (agents as any).children.get(id).rpc.request('inject');
     await wait(() => !!agents.snapshot(id).tools.i1?.result);
     await wait(() => !!agents.snapshot(id).tools.i2?.result);

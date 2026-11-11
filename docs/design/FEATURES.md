@@ -70,7 +70,7 @@ views render the same structured child data.
 ### F2. Optional, real observation
 
 - The human can discover which subagents belong to a main session.
-- Opening one shows its conversation and tool activity, not just a `running`
+- Opening one shows its conversation and tool activity, not just an `active`
   label or a synthetic progress percentage.
 - The intended experience is Pi-like: understand the work, inspect tool calls/
   results, and intervene. This is a human view of structured worker data, NOT a
@@ -88,11 +88,13 @@ views render the same structured child data.
 
 ### F4. Observe and stop first
 
-- Show the conversation/tool activity and provide direct child stop/termination.
+- Show the conversation/tool activity and provide direct child stop; `remove`
+  releases the process and transcript.
 - Parent/human inspection is the v1 supervision mechanism. Active output is not
   proof of useful progress, so inspecting the actual conversation matters.
-- No concurrency limits, request budgets, automatic runtime deadlines, or drift
-  detection in v1. The model decides how many workers to spawn.
+- No admission queue, request budgets, automatic runtime deadlines, or drift
+  detection in v1. Admission is capped at eight registry entries; the model
+  chooses which stopped child to `remove` when it needs a slot.
 - Do not intercept parent Escape or implement stop/resume propagation yet.
 
 ### F5. One capability, multiple access paths
@@ -195,8 +197,9 @@ by completion or stop. Parent fetches results on demand. There is no retry ledge
 or Escape policy.
 
 Parent prompts govern allowed actions and task ownership. The model decides
-fan-out. Concurrency caps/queues, request budgets, automatic deadlines and
-advanced lifecycle/retention machinery are not v1 requirements. Basic validation,
+fan-out. Admission is capped at eight registry entries; queues, request budgets,
+automatic deadlines and advanced lifecycle/retention machinery are not v1
+requirements. Basic validation,
 RPC errors and child cleanup remain ordinary implementation responsibilities.
 Our own extension is selected; further architecture research is not a blocker.
 

@@ -91,7 +91,7 @@ plugin registry, scheduler, event framework or new build toolchain.
 Start with one compact tool, provisionally `subagent`:
 
 ```text
-subagent({ action: "spawn" | "list" | "read" | "send" | "stop" | "presets",
+subagent({ action: "spawn" | "list" | "read" | "send" | "stop" | "remove" | "presets",
            id?: string, message?: string, preset?: string,
            model?: string, thinking?: string, tools?: string })
 ```
@@ -103,7 +103,8 @@ subagent({ action: "spawn" | "list" | "read" | "send" | "stop" | "presets",
 | `list` | Return ids, short task labels, preset names and current state, not transcripts; append available preset names. |
 | `read` | Return the identified child's latest result/error; while working, return a short recent-activity view. No status-polling requirement. |
 | `send` | Deliver `message` to the same conversation, steering when busy or starting a new turn when idle. |
-| `stop` | Terminate that child and release its process resources. This is not parent Escape handling. |
+| `stop` | Abort the current turn and keep the child `stopped`/resumable. Not parent Escape handling. |
+| `remove` | Kill the child process and delete its transcript/id. Frees an admission slot. |
 
 Validate required fields and unknown ids. Ids are `j<counter>-<base36 ms>` and
 opaque; no bare-counter aliases. Keep descriptions and results short.
@@ -129,7 +130,7 @@ on each spawn/discovery call; running children keep their launch configuration.
 
 ### Shared controller
 
-Expose ordinary in-process functions for spawn/list/read/send/stop, conversation
+Expose ordinary in-process functions for spawn/list/read/send/stop/remove, conversation
 snapshot and event subscription. Tool and viewer call the same functions and
 address the same ids. A plain map holds process handles, task text, minimal
 state and display/result data. No serialized copy or global inventory.
@@ -167,7 +168,7 @@ fetches them through `read`. While the parent is busy, coalesce pending notices
 and flush them as one message at `turn_end`, the next `agent_start`, a compaction
 boundary or `agent_end`, so they arrive at the next message boundary; when idle,
 use a short timer to batch near-simultaneous completions and wake the parent.
-A child still `starting`/`running` after 10 minutes queues a notification-only
+A child still `active` after 10 minutes queues a notification-only
 reminder every 10 minutes; it shares the notifier, replaces the older reminder
 for that child, and is removed by completion or stop. No Escape policy, retry/outbox ledger, delivery acknowledgment or continuation
 loop. The API returns void; do not claim submission proves model consumption.
@@ -176,12 +177,12 @@ For process ownership, use a small native-RPC transport in `rpc.ts`, with strict
 LF/UTF-8 JSONL framing, request ids and continuously drained stdout/stderr.
 Pi 1.4.0's public `RpcClient` is the protocol reference, but does not expose a
 process-group spawn/stop hook. Do not access its private fields or build a full
-replacement client. Own the subprocess directly so explicit stop can terminate
+replacement client. Own the subprocess directly so explicit remove/shutdown can terminate
 the Linux process group, including bash descendants. A short termination grace
 and hard-kill fallback are cleanup mechanics, not an automatic job deadline.
 
 Keep child stdin open during use. Close/terminate owned processes on explicit
-stop or `session_shutdown`. Attach terminal/error handlers early, reject pending
+remove or `session_shutdown`; explicit stop only aborts the current turn. Attach terminal/error handlers early, reject pending
 RPC requests on process failure, and make cleanup idempotent. No orphan scan,
 branch bookkeeping, generation ledger, parking or crash-recovery machinery.
 
@@ -219,7 +220,7 @@ streams through parent-context messages to pretend otherwise.
 - [x] Register the compact tool and basic shutdown cleanup.
 - [x] Test notification-only delivery, including result availability before
       notification and no result text injected automatically.
-- [x] Start more than five fake children: no inherited cap or admission queue.
+- [x] Start eight fake children; reject the ninth with a `remove` hint.
 - [x] Keep permission instructions verbatim; add no read-only gate, budgets,
       automatic deadlines or parent Escape handler.
 
@@ -250,7 +251,7 @@ streams through parent-context messages to pretend otherwise.
 - [x] Prove an idle parent wakes on the notice and can retrieve the child result;
       a busy parent receives the ordinary queued notice without custom routing.
 - [x] Prove follow-up retains context, observer disconnect leaves work running,
-      and explicit stop/shutdown releases owned processes.
+      and explicit remove/shutdown releases owned processes; stop keeps them.
 
 Use scratch tasks/data and logs under this repo's ignored `tmp/`, never another
 worker's workspace. Real model probes are opt-in integration tests and consume
@@ -306,7 +307,7 @@ operation is required to implement or test the extension.
 
 ## 8. Explicitly not in this implementation
 
-No concurrency controls, scheduler, request/token budget, automatic job/idle
+No scheduler, admission queue, request/token budget, automatic job/idle
 timeout, read-only enforcement, writer lock, automatic worktree, role/depth
 framework, parent Escape interception, pause/resume propagation, completion retry ledger,
 automatic eviction/parking/revival, durable recovery,

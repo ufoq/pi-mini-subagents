@@ -49,9 +49,9 @@ test('native RPC parent: immediate launch, idle wake, explicit read, busy follow
     await prompt('DELEGATE');
     await until(() => settled() === 1 && mock.childPending.length === 1, 'parent continues before child finishes');
     assert.equal(notifications().length, 0);
-    const startText = events.filter(e => e.type === 'tool_execution_end').map(text).find(value => /j\d+-[a-z0-9]+ starting/.test(value));
+    const startText = events.filter(e => e.type === 'tool_execution_end').map(text).find(value => /j\d+-[a-z0-9]+ active/.test(value));
     assert.ok(startText, 'spawn reply contains a timestamped child id');
-    const childId = /(j\d+-[a-z0-9]+) starting/.exec(startText)![1];
+    const childId = /(j\d+-[a-z0-9]+) active/.exec(startText)![1];
     assert.ok(events.some(e => e.type === 'message_end' && text(e).includes('PARENT_CONTINUES')));
     mock.releaseChild(); // Child uses real native bash.
     await until(() => mock.childPending.length === 1, 'child tool completed');

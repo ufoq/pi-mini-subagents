@@ -41,7 +41,7 @@ slice simple; do not restart the architecture survey or adopt a framework.
 - Persistent native Pi RPC subprocesses; parent can be native TUI or RPC.
 - Launch returns immediately; registry and coordination are in memory.
 - Observe messages/tools and steer the same child; keep context for follow-up.
-- Completion: short `<system-notification>` with id/status and result availability,
+- Completion: short `<system-notification>` with id/outcome and result availability,
   never automatic result bodies. Use Pi's normal delivery to wake an idle parent.
 - Parent fetches results explicitly. Human viewing creates no parent-context
   traffic. Keep model schemas small.
@@ -49,9 +49,12 @@ slice simple; do not restart the architecture survey or adopt a framework.
 - `viewer.ts` is a secondary surface: keep it good enough for occasional lookups, do not
   expand it into a UI project. A web UI is a later goal and out of v1 scope; the
   controller (`agents.ts`) is UI-agnostic and `viewer.ts` is only one consumer.
-- No concurrency limits/queue, request budget, runtime deadline, read-only
-  enforcement, writer lock, worktrees, recursion framework, parent Escape policy,
-  completion retry ledger, durable recovery, or full RPC/server implementation.
+- No queue, request budget, runtime deadline, read-only enforcement, writer lock,
+  worktrees, recursion framework, parent Escape policy, completion retry ledger,
+  durable recovery, or full RPC/server implementation. Admission is capped at
+  eight registry entries; `remove` frees a slot. `stop` aborts the current turn
+  but keeps the child resumable; only `remove`/shutdown release its process and
+  transcript.
 - Basic validation, actionable errors and owned-process cleanup still apply.
 
 ## Engineering

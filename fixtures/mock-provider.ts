@@ -31,7 +31,7 @@ export async function mockProvider() {
     const last = messages.at(-1);
     const parent = body.tools?.some((t: any) => t.function?.name === 'subagent');
     const childId = () => {
-      const found = /(j\d+-[a-z0-9]+) starting/.exec(JSON.stringify(messages));
+      const found = /(j\d+-[a-z0-9]+) active/.exec(JSON.stringify(messages));
       if (!found) throw new Error('No child id in request messages');
       return found[1];
     };
@@ -52,6 +52,8 @@ export async function mockProvider() {
     else if (latest.startsWith('READ')) answer(res, undefined, { name: 'subagent', args: { action: 'read', id: childId() } });
     else if (latest.startsWith('SEND')) answer(res, undefined, { name: 'subagent', args: { action: 'send', id: childId(), message: 'follow-up recall color' } });
     else if (latest.startsWith('STOP')) answer(res, undefined, { name: 'subagent', args: { action: 'stop', id: childId() } });
+    else if (latest.startsWith('REMOVE')) answer(res, undefined, { name: 'subagent', args: { action: 'remove', id: childId() } });
+    else if (latest.startsWith('LIST')) answer(res, undefined, { name: 'subagent', args: { action: 'list' } });
     else if (latest.startsWith('BUSY')) busyPending.push(() => answer(res, 'BUSY_WORK_DONE'));
     else answer(res, 'READY');
   });

@@ -536,3 +536,35 @@ pushed, tagged or published during this review/fix round.
   scripts/probe-tui.ts` passed after the change.
 - The full deterministic suite passed **76/76**; `git diff --check` is clean.
   Version is `0.2.2`; nothing is tagged or published by this work.
+
+### Two-state lifecycle and admission cap (0.2.3)
+
+- Public status is now only `active` or `stopped`. Natural settlement and explicit
+  `stop` leave the child `stopped` with its process and context alive; `send`
+  starts a new turn in the same conversation. `remove` is the only deletion path
+  and releases the process, transcript and registry slot; `shutdown` releases all
+  remaining children.
+- `stop` runs `clear_queue` then `abort` through the same per-child FIFO chain as
+  `send` and the startup prompt, retains the partial answer/tool output, sends no
+  completion notice, and remains idempotent on an idle child. `send` always
+  prompts with `streamingBehavior: "steer"`; steering an active run is marked
+  separately from an idle new turn so a later transport failure preserves the
+  partial answer.
+- Fatal transport/startup failure stays `stopped` and readable; it is not
+  auto-removed. A process exit after an already settled/stopped turn only marks
+  the child dead and does not overwrite the result or emit a second notice.
+- Admission is exactly eight registry entries, including stopped children. The
+  ninth spawn is rejected before process creation with a read/remove hint, and a
+  preset temp file is cleaned on rejection. `remove` frees the slot immediately.
+- Regression coverage includes the send-then-stop FIFO race, steering plus
+  transport death, settled-child process death, stop/send resume in one process,
+  fatal retained output, cap rejection and temp cleanup, remove, viewer fallback
+  when the selected child disappears, and notifier drops for removed ids.
+- Local deterministic suite: **86/86**; native TUI mock probe passes.
+- Installed package e2e in a disposable Ubuntu 24.04 lease (Node 24.22.2, Pi
+  1.4.0, `@ufoq/pi-mini-subagents@0.2.3` from the built tarball): the full offline
+  suite against the installed artifact passed **86/86**, and a native RPC parent
+  probe spawned a real child, stopped it, resumed it with `send` in the same
+  context, then removed it and verified it disappeared from `list`. The lease was
+  deleted afterwards.
+- Version is `0.2.3`; this work is not tagged or published yet.

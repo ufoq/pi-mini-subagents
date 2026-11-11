@@ -47,43 +47,47 @@ Ask the parent to delegate a task with explicit boundaries, for example:
 The single tool is:
 
 ```ts
-subagent({ action: "spawn" | "list" | "read" | "send" | "stop" | "presets",
+subagent({ action: "spawn" | "list" | "read" | "send" | "stop" | "remove" | "presets",
            id?: string, message?: string, model?: string, preset?: string,
            thinking?: string, tools?: string })
 ```
 
 | Action | Required input | Effect |
 | --- | --- | --- |
-| `spawn` | `message` task brief | Returns `j1-mg2k4x9p starting` immediately, before startup completes. Optional `preset` supplies launch defaults; `model`, `thinking` and `tools` override the same preset fields for this child only. |
+| `spawn` | `message` task brief | Returns a timestamped id immediately; the child is `active` while launch completes. Optional `preset` supplies launch defaults; `model`, `thinking` and `tools` override the same preset fields for this child only. At eight registry entries, spawn is rejected until `remove` frees a slot. |
 | `presets` | — | Lists valid user/project presets with defaults and malformed preset files. Does not start a child. |
-| `list` | — | Short ids, states, preset names and task labels; no transcripts. Also shows available preset names. Adds a reminder that settled children retain memory until parent shutdown, while `subagent stop` releases any live process. |
-| `read` | `id` | Latest result/diagnostic, or an attributed transcript (`assistant:`, `tool bash:`, `user:`) while running or after stop. Settled reads end with a retention/stop reminder. Bounded to about 8,000 characters. |
-| `send` | `id`, `message` | Same child/context. Native steering when busy, new turn when idle. |
-| `stop` | `id` | Explicitly terminates the owned process tree; id remains inspectable. |
+| `list` | — | Short ids, `active`/`stopped` state, preset names and task labels; no transcripts. Also shows available preset names and reminds that `remove` releases a stopped child. |
+| `read` | `id` | Latest result/diagnostic, or an attributed transcript (`assistant:`, `tool bash:`, `user:`). Works while active and after stop; stopped output is retained until `remove` or parent shutdown. Bounded to about 8,000 characters. |
+| `send` | `id`, `message` | Same child/context. Native steering while `active`; a `stopped` child starts a new turn in the same process. |
+| `stop` | `id` | Aborts the current turn with Pi `clear_queue` + `abort`, keeps the process/context, and retains the partial answer. Idempotent; no completion notice. |
+| `remove` | `id` | Kills the process and deletes the transcript and id. Allowed in either state; frees a registry slot immediately. |
 
-A finished turn leaves the child alive. `finished` means Pi settled, **not** that
-its assignment succeeded or the answer is correct. Failures retain diagnostics
-for `read`. Launch/startup errors may arrive after the launch tool has returned.
-A rejected steering command is reported to its caller, not treated as proof
-that the existing work stopped.
+A natural turn settles the child to `stopped`, not destroyed: the process and
+context stay alive for `send`, and `read` still works. `stopped` does not imply
+success; the completion notice outcome is `finished` or `failed`, and failures
+retain diagnostics for `read`. `stop` aborts a turn but also leaves the child
+`stopped` and resumable. `remove` is the only operation that releases the
+process and transcript. A rejected steering command is reported to its caller,
+not treated as proof that the existing work stopped.
 
 On settlement or process failure, the only automatic parent-context message is:
 
 ```text
 <system-notification>
-Subagent j1-mg2k4x9p finished. Result/diagnostic available; use subagent read when needed. Settled children stay in memory; subagent stop releases any live child process.
+Subagent j1-mg2k4x9p finished. Result/diagnostic available; use subagent read when needed. Stopped children stay readable; send resumes a live child; subagent remove releases the process and transcript.
 </system-notification>
 ```
 
-It contains identity/status/result availability, never result bodies, progress
-or diagnostics. Pi's `triggerTurn: true`, `deliverAs: "steer"` delivery wakes an
+It contains identity, outcome and result availability, never result bodies,
+progress or diagnostics (a short failure diagnostic may accompany a failed
+notice). Pi's `triggerTurn: true`, `deliverAs: "steer"` delivery wakes an
 idle parent and, when busy, delivers at the next message boundary after the
 current assistant turn and its tool calls. Notices from the same turn are
 coalesced into one message; while idle, a short burst window batches
 near-simultaneous completions. The parent explicitly fetches results.
 
-A child still `starting` or `running` after 10 minutes produces a reminder at
-the same message boundary:
+A child still `active` after 10 minutes produces a reminder at the same message
+boundary:
 
 ```text
 <system-notification>
@@ -91,11 +95,11 @@ Subagent j1-mg2k4x9p has been running for 10 minutes. Use subagent read to check
 </system-notification>
 ```
 
-The reminder repeats every 10 minutes until the child settles or is stopped. It
-is a notification, not a deadline: nothing is cancelled automatically. Reminders
-and completions share one message per burst; the latest reminder for a child
-replaces an older queued one, and a completion or stop removes it.
-Explicit stop/shutdown does not send a completion wakeup. Submission through
+The reminder repeats every 10 minutes while the child is `active`. It is a
+notification, not a deadline: nothing is cancelled automatically. Reminders and
+completions share one message per burst; the latest reminder for a child replaces
+an older queued one, and a completion or stop removes it. Explicit stop/remove
+and shutdown do not send a completion wakeup. Submission through
 Pi's void API is not a delivery/consumption acknowledgment.
 
 ## Presets
@@ -168,9 +172,9 @@ presets fail before any process starts.
 - The conversation shows earlier user/assistant messages, thinking, tool
   arguments/results, and live assistant/tool updates using public Pi renderers.
 - Type at the **>** prompt and press Enter to send to that same child; the status
-  line says whether that steers a running child or starts a new turn.
+  line says whether that steers an active child or starts a new turn.
 - **Page Up / Page Down** scroll; **Ctrl+Y** follows live output.
-- **Ctrl+X** explicitly stops the selected child.
+- **Ctrl+X** aborts the selected child’s current turn; the child remains `stopped` and accepts a new turn. `remove` is only available through the tool, not the viewer.
 - **Escape** returns to the list; Escape again closes the viewer. Neither stops
   the child. Reopening observes the same process and history.
 
@@ -182,8 +186,8 @@ timers behind.
 
 Child ids use a session counter plus a base36 millisecond timestamp, for example
 `j1-mg2k4x9p`. A restarted or resumed parent session cannot silently reuse an
-old `j1`. Ids are opaque: pass the full id to `read`, `send` or `stop`; there are
-no bare-counter aliases.
+old `j1`. Ids are opaque: pass the full id to `read`, `send`, `stop` or `remove`;
+there are no bare-counter aliases.
 
 `/agents` is guarded by `ctx.mode === "tui"`. In RPC mode it emits only an
 informational UI notification; model controls, children and completion delivery
@@ -218,13 +222,16 @@ controls are separate from the TUI for a later explicit adapter.
   part of the same provider quota, but the parent's session cost display excludes
   them because children are separate, ephemeral sessions. There is no per-child
   usage accounting in this extension.
-- Explicit stop and normal `session_shutdown` (including session replacement/
-  reload) clean up owned processes. Linux cleanup snapshots the live descendant
-  tree as well as process groups, since Pi bash tools create detached groups.
-  A 300 ms termination grace precedes hard-kill cleanup; it is not a task deadline.
-- No concurrency cap, admission queue, budget, automatic task deadline, writer
-  lock, worktree, recursion framework, permission profile or parent-Escape policy.
-  The 10-minute reminder is notification-only and never stops or reassigns a child.
+- `remove` and normal `session_shutdown` (including session replacement/reload)
+  clean up owned processes; `stop` deliberately keeps them. Linux cleanup snapshots
+  the live descendant tree as well as process groups, since Pi bash tools create
+  detached groups. A 300 ms termination grace precedes hard-kill cleanup; it is
+  not a task deadline.
+- Admission is capped at eight registry entries, including stopped children.
+  There is no queue, automatic eviction, byte cap, budget, automatic task deadline,
+  writer lock, worktree, recursion framework, permission profile or parent-Escape
+  policy. The 10-minute reminder is notification-only and never stops or reassigns
+  a child. A single child’s transcript can still grow without a byte limit.
 
 ## Development
 
@@ -264,7 +271,7 @@ Actually executed during development:
 
 - Offline transport/controller tests: immediate launch, split UTF-8 and LF-only
   framing, concurrent request correlation, command/protocol/provider/process
-  errors, seven children without a cap, bounded reads, same-child steering/
+  errors, eight-child admission and ninth rejection, bounded reads, same-child steering/
   follow-up, and termination of an owned detached TERM-resistant descendant.
 - Viewer component tests: late snapshot, live tool output, widths 12/30/80,
   long output, scrolling, close/reopen, steering and stop; no parent-context
@@ -313,10 +320,11 @@ See [docs/VERIFICATION.md](docs/VERIFICATION.md) for evidence/limitations and th
 Linux is the cleanup target; other OS process-tree behavior is not verified.
 Orderly stop/shutdown is covered, not recovery after parent SIGKILL/container
 loss, or deliberately daemonized/reparented descendants. There is no durable
-registry or cross-restart control. Finished children stay alive (and stoppable)
-until `subagent stop` or parent shutdown; there is no idle reaper or child cap.
-Histories stay in memory until parent shutdown, and the simple viewer rebuilds on
-updates; very large transcripts can cost memory and rendering time. Concurrent actors share native Pi steering semantics, not
+registry or cross-restart control. Stopped children stay alive (and resumable)
+until `subagent remove` or parent shutdown; there is no idle reaper. Histories
+stay in memory until removal or shutdown, bounded only by the eight-entry cap;
+the simple viewer rebuilds on updates, and very large transcripts can cost memory
+and rendering time. Concurrent actors share native Pi steering semantics, not
 transactional task control. Providers installed only by a parent extension (or
 runtime-only credential overrides) are not automatically inherited. Existing
 third-party footer/editor extension combinations have not been exhaustively

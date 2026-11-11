@@ -2,7 +2,10 @@ import { spawn } from 'node:child_process';
 let buffer = '';
 let messages = [];
 let pending = [];
+let discarded = [];
+let commands = [];
 let active = false;
+let streaming = '';
 const emit = (data) => process.stdout.write(JSON.stringify(data) + '\n');
 const message = (m) => { messages.push(m); emit({ type: 'message_end', message: m }); };
 const assistant = (text, extra = {}) => ({ role: 'assistant', content: [{ type: 'text', text }], timestamp: Date.now(), stopReason: 'stop', ...extra });
@@ -19,19 +22,41 @@ process.stdin.on('data', chunk => {
   while ((n = buffer.indexOf('\n')) >= 0) {
     const line = buffer.slice(0, n); buffer = buffer.slice(n + 1);
     const c = JSON.parse(line);
+    commands.push(c.type);
     const reply = (data) => emit({ type: 'response', id: c.id, command: c.type, success: true, data });
     switch (c.type) {
       case 'get_state': reply({ sessionId: 'fake-session', model: { provider: 'fake-model', id: 'fake' } }); break;
       case 'get_messages': reply({ messages }); break;
       case 'get_last_assistant_text': reply({ text: messages.findLast(m => m.role === 'assistant')?.content[0].text }); break;
+      case 'clear_queue':
+        discarded = pending.slice();
+        pending = [];
+        reply({ steering: [], followUp: [] });
+        break;
+      case 'command-log':
+        reply({ commands: commands.slice(0, -1), discarded });
+        break;
+      case 'crash-now':
+        process.exit(7);
+        break;
+      case 'abort':
+        if (active) {
+          active = false;
+          if (streaming) message(assistant(streaming, { stopReason: 'aborted' }));
+          streaming = '';
+          emit({ type: 'agent_settled', aborted: true });
+        }
+        reply({});
+        break;
       case 'prompt':
         if (c.message === 'reject') { emit({ type: 'response', id: c.id, command: c.type, success: false, error: 'prompt rejected' }); break; }
         if (c.message === 'reject-inject') { emit({ type: 'response', id: c.id, command: c.type, success: false, error: 'bad \x9d52;c;SECRET\x9c' }); break; }
         if (active && c.streamingBehavior !== 'steer') throw new Error('must steer');
+        streaming = '';
         if (c.message === 'crashlong') {
           emit({ type: 'agent_start' });
           emit({ type: 'message_start', message: assistant('', { stopReason: 'pending' }) });
-          emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'A'.repeat(600) + '\nTAIL_MARKER' } });
+          streaming = 'A'.repeat(600) + '\nTAIL_MARKER'; emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: streaming } });
           setTimeout(() => process.exit(7), 10);
           break;
         }
@@ -43,6 +68,15 @@ process.stdin.on('data', chunk => {
             { type: 'message_end', message: done },
             { type: 'agent_settled', aborted: false },
           ].map(value => JSON.stringify(value)).join('\n') + '\n');
+          break;
+        }
+        if (c.message === 'busystream') {
+          active = true;
+          reply({ disposition: 'started' });
+          emit({ type: 'agent_start' });
+          emit({ type: 'message_start', message: assistant('', { stopReason: 'pending' }) });
+          streaming = 'PARTIAL STEER ANSWER';
+          emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: streaming } });
           break;
         }
         if (c.message === 'crashbeforestart') {
@@ -67,7 +101,7 @@ process.stdin.on('data', chunk => {
         if (c.message === 'crashstream') {
           emit({ type: 'agent_start' });
           emit({ type: 'message_start', message: assistant('', { stopReason: 'pending' }) });
-          emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'PARTIAL ANSWER' } });
+          streaming = 'PARTIAL ANSWER'; emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: streaming } });
           setTimeout(() => process.exit(7), 10);
           break;
         }
@@ -77,7 +111,7 @@ process.stdin.on('data', chunk => {
         active = true;
         emit({ type: 'agent_start' });
         emit({ type: 'message_start', message: assistant('', { stopReason: 'pending' }) });
-        emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'working …\u2028中' } });
+        streaming = 'working …\u2028中'; emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'working …\u2028中' } });
         const command = messages.filter(m => m.role === 'user').length > 1 ? 'second' : 'example';
         message(assistant('starting', { content: [{ type: 'toolCall', id: 't1', name: 'bash', arguments: { command } }], stopReason: 'toolUse' }));
         emit({ type: 'tool_execution_start', toolCallId: 't1', toolName: 'bash', args: { command } });
@@ -99,7 +133,7 @@ process.stdin.on('data', chunk => {
           { type: 'thinking_delta', contentIndex: 1, delta: 'thinking' },
           { type: 'toolcall_start', contentIndex: 2, id: 'stream-tool', toolName: 'bash' },
           { type: 'toolcall_delta', contentIndex: 2, delta: '{"command":"echo' },
-        ]) emit({ type: 'message_update', assistantMessageEvent });
+        ]) { if (assistantMessageEvent.type === 'text_delta') streaming += assistantMessageEvent.delta; emit({ type: 'message_update', assistantMessageEvent }); }
         reply({}); break;
       case 'stream_end': message(assistant('FINAL authoritative message')); reply({}); break;
       case 'inject':
@@ -130,7 +164,7 @@ process.stdin.on('data', chunk => {
           { type: 'thinking_delta', contentIndex: 0, delta: '\x1b]52;c;' },
           { type: 'text_start', contentIndex: 1 },
           { type: 'text_delta', contentIndex: 1, delta: 'SECRET\x07AFTER' },
-        ]) emit({ type: 'message_update', assistantMessageEvent });
+        ]) { if (assistantMessageEvent.type === 'text_delta') streaming += assistantMessageEvent.delta; emit({ type: 'message_update', assistantMessageEvent }); }
         reply({}); break;
       case 'metadataresult':
         emit({ type: 'tool_execution_start', toolCallId: 'm1', toolName: 'bash', args: { command: 'metadata' } });
@@ -181,7 +215,7 @@ process.stdin.on('data', chunk => {
       case 'interruptsplit':
         message(assistant('\x1b]52;c;'));
         emit({ type: 'message_start', message: assistant('', { content: [], stopReason: 'pending' }) });
-        emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'SECRET\x07AFTER' } });
+        streaming = 'SECRET\x07AFTER'; emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: streaming } });
         reply({}); break;
       case 'resultmessage':
         emit({ type: 'tool_execution_start', toolCallId: 'r1', toolName: 'bash', args: { command: 'result' } });
@@ -196,7 +230,7 @@ process.stdin.on('data', chunk => {
         reply({}); break;
       case 'long':
         emit({ type: 'message_start', message: assistant('', { content: [], stopReason: 'pending' }) });
-        emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'A'.repeat(600) + '\nTAIL_MARKER' } });
+        streaming = 'A'.repeat(600) + '\nTAIL_MARKER'; emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: streaming } });
         reply({}); break;
       case 'result':
         message(assistant('CLEAN \x1b]8;;https://example\x1b\\link\x1b]8;;\x1b\\ \x1b[2J\x07done'));

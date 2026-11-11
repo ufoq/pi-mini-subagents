@@ -49,7 +49,9 @@ test('native RPC parent: immediate launch, idle wake, explicit read, busy follow
     await prompt('DELEGATE');
     await until(() => settled() === 1 && mock.childPending.length === 1, 'parent continues before child finishes');
     assert.equal(notifications().length, 0);
-    assert.ok(events.some(e => e.type === 'tool_execution_end' && text(e).includes('j1 starting')));
+    const startText = events.filter(e => e.type === 'tool_execution_end').map(text).find(value => /j\d+-[a-z0-9]+ starting/.test(value));
+    assert.ok(startText, 'spawn reply contains a timestamped child id');
+    const childId = /(j\d+-[a-z0-9]+) starting/.exec(startText)![1];
     assert.ok(events.some(e => e.type === 'message_end' && text(e).includes('PARENT_CONTINUES')));
     mock.releaseChild(); // Child uses real native bash.
     await until(() => mock.childPending.length === 1, 'child tool completed');
@@ -57,8 +59,8 @@ test('native RPC parent: immediate launch, idle wake, explicit read, busy follow
     await until(() => settled() === 2, 'idle parent woke on completion');
     assert.equal(notifications().length, 1);
     const notice = notifications()[0].message;
-    assert.equal(notice.customType, 'mini-subagent-completion');
-    assert.match(notice.content, /<system-notification>.*j1 finished.*available/s);
+    assert.equal(notice.customType, 'mini-subagent-notice');
+    assert.match(notice.content, new RegExp(`<system-notification>.*${childId} finished.*available`, 's'));
     assert.ok(!notice.content.includes('CHILD_SECRET_RESULT'));
     assert.ok(events.some(e => e.type === 'message_end' && text(e).includes('NOTICE_SEEN')));
     assert.ok(!events.some(e => text(e).includes('CHILD_SECRET_RESULT')), 'no automatic result/transcript injected');
@@ -94,7 +96,7 @@ test('native RPC parent: immediate launch, idle wake, explicit read, busy follow
     assert.ok(!followup.tools.some((t: any) => t.function.name === 'subagent'), 'child cannot delegate');
     const count = settled();
     await prompt('STOP'); await until(() => settled() > count, 'explicit stop');
-    assert.ok(events.some(e => e.type === 'tool_execution_end' && text(e).includes('j1 stopped')));
+    assert.ok(events.some(e => e.type === 'tool_execution_end' && text(e).includes(`${childId} stopped`)));
     assert.deepEqual(failures, []);
     // Leave a second child running, then close only parent stdin. This proves
     // session_shutdown cleanup, rather than the harness killing the whole tree.

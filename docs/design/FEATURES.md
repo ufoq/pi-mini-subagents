@@ -60,6 +60,10 @@ views render the same structured child data.
   a status-polling loop. It retrieves the result explicitly when needed.
 - The notice wakes an idle parent and serves as a reminder when it is busy;
   result bodies are not automatically inserted into parent context.
+- Children still running after 10 minutes emit notification-only reminders every
+  10 minutes; the parent decides whether to inspect or stop them.
+- Child ids include a base36 millisecond timestamp so a restarted session cannot
+  reuse an old `j1`.
 - The model-facing interface should stay small; no mandatory workflow language
   or orchestration bookkeeping.
 
@@ -186,8 +190,9 @@ records the minimal loop: spawn, observe, steer/follow up, stop, and notify.
 Completion sends only a `<system-notification>` that the child is done and its
 result is available. Pi's existing `steer` delivery wakes an idle parent and
 enters a busy parent at the next message boundary; pending notices are coalesced
-into one message. Parent fetches results on demand. There is no retry ledger or
-Escape policy.
+into one message. Long-running reminders share the notifier and are superseded
+by completion or stop. Parent fetches results on demand. There is no retry ledger
+or Escape policy.
 
 Parent prompts govern allowed actions and task ownership. The model decides
 fan-out. Concurrency caps/queues, request budgets, automatic deadlines and

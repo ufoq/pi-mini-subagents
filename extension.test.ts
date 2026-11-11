@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { load } from './fixtures/pi-loader.ts';
 import { Agents } from './agents.ts';
 import { RpcProcess } from './rpc.ts';
-const { default: register, completionNotification, createCompletionNotifier, sendCompletionNotices, parseModel, listReply, startingReply } = await load.import('../index.ts');
+const { default: register, completionNotification, createCompletionNotifier, sendNotices, noticeNotification, parseModel, listReply, startingReply } = await load.import('../index.ts');
 const { AgentViewer } = await load.import('../viewer.ts');
 const { visibleWidth, CURSOR_MARKER } = await load.import('@earendil-works/pi-tui');
 const { initTheme, ToolExecutionComponent } = await load.import('@earendil-works/pi-coding-agent');
@@ -30,11 +30,12 @@ test('one compact tool, actionable validation, exact completion-only delivery an
   assert.ok(tools[0].parameters.properties.preset);
   assert.ok(tools[0].parameters.properties.thinking);
   assert.ok(tools[0].parameters.properties.tools);
+  assert.match(tools[0].promptGuidelines.join(' '), /list.*presets/i);
   assert.equal(tools[0].parameters.properties.system_append, undefined, 'system_append is preset-only, never a tool argument');
   const ctx = { mode: 'rpc', cwd: process.cwd(), isProjectTrusted: () => false, ui: { notify() {}, custom() { assert.fail('terminal UI in RPC'); } } };
   await handlers.get('session_start')({}, ctx);
   const execute = (params: any) => tools[0].execute('t', params, undefined, undefined, ctx);
-  assert.match((await execute({ action: 'list' })).content[0].text, /No subagents/);
+  assert.match((await execute({ action: 'list' })).content[0].text, /No subagents[\s\S]*Presets: /);
   await assert.rejects(execute({ action: 'read' }), /id is required/);
   await assert.rejects(execute({ action: 'send', id: 'missing', message: 'hello' }), /Unknown/);
   await commands[0].handler('', ctx);
@@ -44,6 +45,9 @@ test('one compact tool, actionable validation, exact completion-only delivery an
   assert.match(content, /^<system-notification>\nSubagent j1 failed\./);
   assert.match(content, /subagent stop releases any live child process/);
   assert.ok(!content.includes('SECRET RESULT'));
+  const reminder = noticeNotification([{ id: 'j1-abc', minutes: 10 }]);
+  assert.match(reminder, /has been running for 10 minutes/);
+  assert.ok(!reminder.includes('Settled children stay in memory'));
   assert.equal(startingReply('j1'), 'j1 starting. Parent may continue; completion will notify. Results require read.');
   assert.match(startingReply('j1', { provider: 'mock', id: 'alias/model' }), /starting on mock\/alias\/model/);
   assert.match(startingReply('j1', { provider: 'mock', id: 'mock' }, 'oracle'), /^j1 starting \(oracle\) on mock\/mock\./);
@@ -52,6 +56,7 @@ test('one compact tool, actionable validation, exact completion-only delivery an
   assert.match(listReply([{ id: 'j1', status: 'finished', task: 'review' }]), /subagent stop releases any live child process/);
   assert.ok(!listReply([{ id: 'j1', status: 'running', task: 'review' }]).includes('subagent stop'));
   assert.equal(listReply([]), 'No subagents.');
+  assert.equal(listReply([], 'Presets: none.'), 'No subagents.\nPresets: none.');
   assert.equal(parseModel(undefined), undefined);
   assert.deepEqual(parseModel('anthropic/claude-sonnet-4-5'), { provider: 'anthropic', id: 'claude-sonnet-4-5' });
   // Model ids themselves may contain slashes.
@@ -106,15 +111,45 @@ test('completion notices coalesce into one steer message per boundary', async ()
 test('completion delivery is one steer message with every finished id', async () => {
   const sent: any[] = [];
   const pi = { sendMessage: (...args: any[]) => sent.push(args) };
-  await sendCompletionNotices(pi as any, [{ id: 'j1', status: 'finished' }, { id: 'j2', status: 'failed' }]);
+  await sendNotices(pi as any, [{ id: 'j1', status: 'finished' }, { id: 'j2', status: 'failed' }]);
   assert.equal(sent.length, 1);
   const [message, options] = sent[0];
-  assert.equal(message.customType, 'mini-subagent-completion');
+  assert.equal(message.customType, 'mini-subagent-notice');
   assert.equal(options.deliverAs, 'steer');
   assert.equal(options.triggerTurn, true);
   assert.match(message.content, /Subagent j1 finished/);
   assert.match(message.content, /Subagent j2 failed/);
   assert.equal(message.content.match(/<system-notification>/g)?.length, 1);
+});
+
+test('reminders coalesce per child and share message boundaries', async () => {
+  const batches: any[][] = [];
+  const notifier = createCompletionNotifier(batch => batches.push(batch), 10);
+  notifier.remind('j1', 10);
+  notifier.remind('j1', 20);
+  notifier.remind('j2', 30);
+  assert.deepEqual(batches, []);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.deepEqual(batches, [[{ id: 'j1', minutes: 20 }, { id: 'j2', minutes: 30 }]]);
+
+  notifier.startRun();
+  notifier.remind('j1', 30);
+  notifier.add('j1', 'finished');
+  notifier.boundary();
+  assert.deepEqual(batches[1], [{ id: 'j1', status: 'finished' }], 'completion supersedes a reminder');
+
+  notifier.remind('j2', 40);
+  notifier.cancel('j2');
+  notifier.boundary();
+  assert.equal(batches.length, 2, 'cancel removes a pending reminder');
+
+  notifier.remind('j3', 10);
+  notifier.add('j4', 'failed');
+  notifier.boundary();
+  assert.deepEqual(batches[2], [{ id: 'j4', status: 'failed' }, { id: 'j3', minutes: 10 }]);
+  assert.match(noticeNotification(batches[2] as any), /Subagent j3 has been running for 10 minutes/);
+  assert.match(noticeNotification(batches[2] as any), /Settled children stay in memory/);
+  notifier.clear();
 });
 
 test('presets action lists config and an unknown preset starts no child', async () => {
@@ -135,6 +170,7 @@ SYSTEM
 `);
     const listing = await execute({ action: 'presets' });
     assert.match(listing.content[0].text, /oracle \(user\)/);
+    assert.match((await execute({ action: 'list' })).content[0].text, /Presets: oracle/);
     await assert.rejects(execute({ action: 'spawn', preset: 'missing', message: 'x' }), /Unknown subagent preset/);
     assert.match((await execute({ action: 'list' })).content[0].text, /No subagents/);
   } finally {
@@ -195,7 +231,7 @@ test('viewer lists newest subagents first', async () => {
     assert.ok(lines[0].includes('╭') && lines.at(-1)!.includes('╰'), 'wide overlay is framed');
     assert.ok(lines.every((line: string) => visibleWidth(line) === 100), 'frame fills the requested width');
     assert.ok(lines.slice(2, -2).every((line: string) => line.includes('│')), 'content rows are bordered');
-    const order = lines.map((line: string) => /\(j\d\)|j\d/.exec(line)?.[0]).filter(Boolean);
+    const order = lines.map((line: string) => /j\d+-[a-z0-9]+/.exec(line)?.[0]).filter(Boolean);
     assert.deepEqual(order.slice(0, 2), [second, first], 'newest child on top');
     // ↓ selects the second row, which is now the older child.
     viewer.focused = true; viewer.handleInput('\u001b[B'); viewer.handleInput('\r');
@@ -209,9 +245,9 @@ test('viewer shows the preset on a child in both list and detail views', async (
   const theme = { fg: (_: string, s: string) => s, bg: (_: string, s: string) => s, bold: (s: string) => s };
   const viewer: any = new AgentViewer(agents, { requestRender() {}, terminal: { rows: 24 } }, theme, () => {}, process.cwd(), id);
   try {
-    assert.match(viewer.render(80).join('\n'), /j1 \(oracle\)/);
+    assert.match(viewer.render(80).join('\n'), new RegExp(`${id} \\(oracle\\)`));
     viewer.handleInput('\u001b');
-    assert.match(viewer.render(80).join('\n'), /j1 \(oracle\)/);
+    assert.match(viewer.render(80).join('\n'), new RegExp(`${id} \\(oracle\\)`));
   } finally { viewer.dispose(); await agents.shutdown(); }
 });
 

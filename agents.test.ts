@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
-import { Agents, childInvocation, label, plain, sanitize, sanitizeMany, transcript } from './agents.ts';
+import { Agents, childInvocation, label, plain, sanitize, sanitizeMany, transcript, type AgentOptions } from './agents.ts';
 import { RpcProcess } from './rpc.ts';
 const invocation = { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() };
 async function until(predicate: () => boolean) {
@@ -11,14 +11,14 @@ async function until(predicate: () => boolean) {
   }
   assert.fail('condition not reached');
 }
-function setup() {
+function setup(options?: AgentOptions) {
   const processes: RpcProcess[] = [];
   const notices: any[] = [];
   const agents = new Agents((id, status) => {
     notices.push({ id, status, read: agents.read(id) });
   }, (spec, event, failure) => {
     const rpc = new RpcProcess(spec, event, failure); processes.push(rpc); return rpc;
-  });
+  }, options);
   return { agents, processes, notices };
 }
 
@@ -50,7 +50,7 @@ test('launch is immediate; late snapshot, live activity, steering and persistent
     await processes[0].request('settle');
     assert.equal(agents.list()[0].status, 'finished');
     assert.match(notices[0].read, /SECRET RESULT/);
-    assert.match(notices[0].read, /^j1 finished · fake-model\/fake$/m);
+    assert.match(notices[0].read, new RegExp(`^${id} finished · fake-model\\/fake$`, 'm'));
     assert.match(notices[0].read, /retained: transcript in memory; subagent stop releases any live child process/);
     assert.ok(updates > 0);
     unsubscribe();
@@ -462,7 +462,7 @@ test('stopping keeps recent output readable, including a partial answer', async 
     await until(() => agents.snapshot(id).streaming?.content?.[0]?.text === 'authoritative text');
     await agents.stop(id);
     const partial = agents.read(id);
-    assert.match(partial, /^j1 stopped · fake-model\/fake$/m);
+    assert.match(partial, new RegExp(`^${id} stopped · fake-model\\/fake$`, 'm'));
     assert.match(partial, /user: stop me/);
     assert.match(partial, /assistant \(interrupted\): authoritative text/);
     assert.match(partial, /tool bash \(interrupted\): .*live output/s);
@@ -481,6 +481,36 @@ test('stopping keeps recent output readable, including a partial answer', async 
   } finally { await agents.shutdown(); }
 });
 
+test('long-running children get reminders until settlement or stop', async () => {
+  const reminders: Array<{ id: string; minutes: number }> = [];
+  const cancelled: string[] = [];
+  const { agents, processes } = setup({
+    reminderMs: 20,
+    remind: (id, minutes) => reminders.push({ id, minutes }),
+    cancelReminder: id => cancelled.push(id),
+  });
+  try {
+    const id = agents.spawn('slow task', invocation);
+    await until(() => agents.snapshot(id).status === 'running');
+    await until(() => reminders.length >= 2);
+    assert.ok(reminders.every(r => r.id === id && r.minutes >= 1));
+
+    await processes[0].request('result');
+    assert.equal(agents.snapshot(id).status, 'finished');
+    const settled = reminders.length;
+    await new Promise(r => setTimeout(r, 60));
+    assert.equal(reminders.length, settled, 'settled child stops reminders');
+
+    await agents.send(id, 'follow-up');
+    await until(() => reminders.length > settled);
+    await agents.stop(id);
+    const stopped = reminders.length;
+    await new Promise(r => setTimeout(r, 60));
+    assert.equal(reminders.length, stopped, 'stopped child stops reminders');
+    assert.ok(cancelled.includes(id));
+  } finally { await agents.shutdown(); }
+});
+
 test('stop during startup does not submit work or emit completion', async () => {
   const { agents, notices } = setup();
   const id = agents.spawn('task', invocation);
@@ -496,7 +526,7 @@ test('a child whose process cannot be constructed is never retained', async () =
   const agents = new Agents((id, status) => notices.push({ id, status }), () => {
     throw new Error("The argument 'args[5]' must be a string without null bytes.");
   });
-  assert.throws(() => agents.spawn('task', invocation), /Could not start j1: .*null bytes/);
+  assert.throws(() => agents.spawn('task', invocation), /Could not start j\d+-[a-z0-9]+: .*null bytes/);
   assert.deepEqual(agents.list(), []);
   assert.equal(notices.length, 0);
   await agents.shutdown(); // must not touch a half-registered child
@@ -511,12 +541,12 @@ test('a synchronous failure from a factory that still returns a process is deliv
   });
   agents.subscribe(() => observed.push(agents.list().map(c => `${c.id} ${c.status}`)));
   const id = agents.spawn('task', invocation);
-  assert.equal(id, 'j1');
-  assert.deepEqual(observed, [['j1 failed']], 'one publication, after launch, with the final state');
-  assert.deepEqual(agents.list().map(c => `${c.id} ${c.status}`), ['j1 failed']);
+  assert.match(id, /^j1-[a-z0-9]+$/);
+  assert.deepEqual(observed, [[`${id} failed`]], 'one publication, after launch, with the final state');
+  assert.deepEqual(agents.list().map(c => `${c.id} ${c.status}`), [`${id} failed`]);
   await until(() => notices.length === 1);
-  assert.deepEqual(notices, [{ id: 'j1', status: 'failed' }]);
-  assert.match(agents.read('j1'), /spawn failed synchronously/);
+  assert.deepEqual(notices, [{ id, status: 'failed' }]);
+  assert.match(agents.read(id), /spawn failed synchronously/);
   await agents.shutdown();
 });
 
@@ -528,7 +558,7 @@ test('a factory that fails synchronously before throwing emits no notification',
     throw new Error('factory threw after reporting failure');
   });
   agents.subscribe(() => observed.push(agents.list().map(c => `${c.id} ${c.status}`)));
-  assert.throws(() => agents.spawn('task', invocation), /Could not start j1: factory threw/);
+  assert.throws(() => agents.spawn('task', invocation), /Could not start j\d+-[a-z0-9]+: factory threw/);
   assert.deepEqual(agents.list(), []);
   assert.equal(notices.length, 0, 'no completion for a child id the caller never received');
   assert.deepEqual(observed, [], 'a discarded child is never published to observers');
@@ -544,7 +574,7 @@ test('callbacks queued by a factory that then throws never reach observers or th
     throw new Error('factory threw');
   });
   agents.subscribe(() => observed.push(agents.list().map(c => `${c.id} ${c.status}`)));
-  assert.throws(() => agents.spawn('task', invocation), /Could not start j1: factory threw/);
+  assert.throws(() => agents.spawn('task', invocation), /Could not start j\d+-[a-z0-9]+: factory threw/);
   await new Promise(r => setImmediate(r));
   assert.deepEqual(agents.list(), []);
   assert.deepEqual(observed, [], 'a discarded child is never published');
@@ -561,9 +591,9 @@ test('a throwing completion notifier does not invalidate a retained child', asyn
     return { request: async () => { throw new Error('unreachable'); }, stop: async () => {} } as any;
   });
   const id = agents.spawn('task', invocation);
-  assert.equal(id, 'j1');
-  assert.deepEqual(agents.list().map(c => `${c.id} ${c.status}`), ['j1 failed']);
-  assert.match(agents.read('j1'), /spawn failed synchronously/);
+  assert.match(id, /^j1-[a-z0-9]+$/);
+  assert.deepEqual(agents.list().map(c => `${c.id} ${c.status}`), [`${id} failed`]);
+  assert.match(agents.read(id), /spawn failed synchronously/);
   console.error = error;
   assert.match(String(logged.at(-1)), /completion delivery failed/i, 'delivery failure is logged, not silent');
   await agents.shutdown();
@@ -626,9 +656,9 @@ test('a failed launch still consumes its id, so ids stay monotonic', async () =>
     if (++calls === 1) throw new Error('factory threw');
     return new RpcProcess({ command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() }, () => {}, () => {});
   });
-  assert.throws(() => agents.spawn('task', invocation), /Could not start j1/);
+  assert.throws(() => agents.spawn('task', invocation), /Could not start j\d+-[a-z0-9]+/);
   const second = agents.spawn('task', { command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() });
-  assert.equal(second, 'j2');
+  assert.match(second, /^j2-[a-z0-9]+$/);
   await agents.shutdown();
 });
 
@@ -670,7 +700,7 @@ test('preset system append uses a temporary file, overrides tools, and is cleane
     const id = agents.spawn('preset task', { ...valid, command: process.execPath, args: ['fixtures/fake-rpc.mjs'], cwd: process.cwd() }, 'oracle');
     await until(() => agents.snapshot(id).status === 'running');
     assert.equal(agents.list()[0].preset, 'oracle');
-    assert.match(agents.read(id), /^j1 running · oracle · fake-model\/fake/);
+    assert.match(agents.read(id), new RegExp(`^${id} running · oracle · fake-model\\/fake`));
     await processes[0].request('provider_error');
     await until(() => agents.snapshot(id).status === 'failed');
     assert.equal(existsSync(secondFile), false, 'failed settlement removes the prompt file');

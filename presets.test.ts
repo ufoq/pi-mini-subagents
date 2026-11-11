@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { load } from './fixtures/pi-loader.ts';
 
-const { composeSystemAppend, discoverPresets, parseModel, parseThinking, parseTools, presetsReply, unknownPreset } = await load.import('../presets.ts');
+const { composeSystemAppend, discoverPresets, parseModel, parseThinking, parseTools, presetNamesLine, presetsReply, unknownPreset } = await load.import('../presets.ts');
 
 async function workspace() {
   const root = await mkdtemp(join(tmpdir(), 'mini-presets-'));
@@ -146,6 +146,14 @@ B
     assert.match(presetsReply(found), /invalid .*missing-name\.md/);
     assert.match(unknownPreset('nope', found), /Unknown subagent preset "nope".*Available: explicit/s);
   } finally { await rm(ws.root, { recursive: true, force: true }); }
+});
+
+test('list preset names are compact and capped', () => {
+  assert.equal(presetNamesLine({ presets: [], errors: [], userDir: '/tmp/presets' }), 'Presets: none.');
+  const presets = Array.from({ length: 25 }, (_, i) => ({ name: `p${i}` }));
+  const line = presetNamesLine({ presets, errors: [], userDir: '/tmp/presets' } as any);
+  assert.match(line, /^Presets: p0, p1/);
+  assert.match(line, /\+5 more/);
 });
 
 test('model, thinking and tool parsers reject invalid values before launch', () => {

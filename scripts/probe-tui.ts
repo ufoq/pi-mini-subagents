@@ -41,6 +41,8 @@ try {
   await until(() => mock.childPending.length === 1 && output().includes('PARENT_CONTINUES'), 'parent continued');
   input('/agents\r');
   await until(() => output().includes('existing conversations'), 'child list');
+  const childId = /(j\d+-[a-z0-9]+)/.exec(output())?.[1];
+  assert.ok(childId, 'list shows a timestamped child id');
   input('\r');
   await until(() => output().includes('Enter sends to this child'), 'existing conversation');
   mock.releaseChild();
@@ -53,7 +55,7 @@ try {
   await closeViewer();
   assert.equal(mock.childPending.length, 1);
   const beforeReopen = raw.length;
-  input('/agents j1\r');
+  input(`/agents ${childId}\r`);
   await until(() => stripVTControlCharacters(raw.slice(beforeReopen)).includes('Enter sends to this child'), 'reopen same child');
   command({ type: 'resize', rows: 24, columns: 40 });
   input('\u001b[5~'); input('\u001b[6~');
@@ -73,11 +75,11 @@ try {
   const beforeFollowup = raw.length;
   mock.releaseChild();
   await until(() => stripVTControlCharacters(raw.slice(beforeFollowup)).includes('NOTICE_SEEN'), 'follow-up completion');
-  input('/agents j1\r');
+  input(`/agents ${childId}\r`);
   const beforeStop = raw.length;
   await until(() => stripVTControlCharacters(raw.slice(beforeStop)).includes('Enter sends to this child'), 'open to stop');
   input('\u0018');
-  await until(() => output().includes('j1 stopped'), 'human explicit stop');
+  await until(() => output().includes(`${childId} stopped`), 'human explicit stop');
   await closeViewer(); input('/quit\r');
   await until(() => !!exit, 'TUI orderly exit');
   assert.equal(exit.code, 0);

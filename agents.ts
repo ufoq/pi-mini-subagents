@@ -12,9 +12,16 @@ export interface Snapshot {
   messages: RecordData[]; streaming?: RecordData; interrupted?: string; interruptedMessage?: RecordData;
   tools: Record<string, ToolActivity>; result?: string; error?: string;
 }
-interface Child extends Snapshot { rpc: RpcProcess; ready: Promise<void>; held?: boolean; dirty?: boolean; pending?: Status[]; sequence?: number; pendingStart?: boolean; cleanup?: () => void }
+interface Child extends Snapshot { rpc: RpcProcess; ready: Promise<void>; held?: boolean; dirty?: boolean; pending?: Status[]; sequence?: number; pendingStart?: boolean; cleanup?: () => void; reminder?: ReturnType<typeof setTimeout>; activeSince?: number }
 type ProcessFactory = (spec: Invocation, event: (e: RecordData) => void, failure: (e: Error) => void) => RpcProcess;
 export interface ChildOptions { tools?: string[]; systemAppend?: string }
+export interface AgentOptions {
+  reminderMs?: number;
+  remind?: (id: string, minutes: number) => void;
+  cancelReminder?: (id: string) => void;
+}
+
+export const REMINDER_MS = 10 * 60 * 1000;
 
 export function childInvocation(cwd: string, model?: { provider: string; id: string }, thinking?: string, options?: ChildOptions): Invocation {
   const shell = process.platform === 'win32' ? 'powershell' : 'bash';
@@ -239,10 +246,16 @@ export class Agents {
   private closing = false;
   private notify: (id: string, status: Status) => void;
   private createProcess: ProcessFactory;
+  private reminderMs: number;
+  private remind?: (id: string, minutes: number) => void;
+  private cancelReminder?: (id: string) => void;
 
-  constructor(notify: (id: string, status: Status) => void, createProcess: ProcessFactory = (spec, event, failure) => new RpcProcess(spec, event, failure)) {
+  constructor(notify: (id: string, status: Status) => void, createProcess: ProcessFactory = (spec, event, failure) => new RpcProcess(spec, event, failure), options: AgentOptions = {}) {
     this.notify = notify;
     this.createProcess = createProcess;
+    this.reminderMs = options.reminderMs ?? REMINDER_MS;
+    this.remind = options.remind;
+    this.cancelReminder = options.cancelReminder;
   }
 
   spawn(message: string, invocation: Invocation, preset?: string): string {
@@ -253,7 +266,7 @@ export class Agents {
       invocation.cleanup?.();
       throw error;
     }
-    const id = `j${++this.sequence}`;
+    const id = `j${++this.sequence}-${Date.now().toString(36)}`;
     const child = { id, task: message, preset, status: 'starting', messages: [], tools: {} } as Child;
     // Register first so a process factory that calls back synchronously can be
     // observed; hold notifications until launch has actually succeeded.
@@ -271,6 +284,10 @@ export class Agents {
     // Launch succeeded: publish everything a synchronous factory callback queued.
     child.held = false;
     child.ready = this.start(child, message);
+    // Spawn counts as active so a launch that never reaches agent_start can
+    // still produce a reminder.
+    child.activeSince = Date.now();
+    this.armReminder(child);
     const provisional = child.dirty === true;
     if (provisional) { child.dirty = false; this.changed(id); }
     for (const status of child.pending?.splice(0) ?? []) this.complete(id, status);
@@ -306,7 +323,7 @@ export class Agents {
   }
 
   snapshot(id: string): Snapshot {
-    const { rpc: _rpc, ready: _ready, held: _held, dirty: _dirty, pending: _pending, sequence: _sequence, pendingStart: _pendingStart, cleanup: _cleanup, ...snapshot } = this.get(id);
+    const { rpc: _rpc, ready: _ready, held: _held, dirty: _dirty, pending: _pending, sequence: _sequence, pendingStart: _pendingStart, cleanup: _cleanup, reminder: _reminder, activeSince: _activeSince, ...snapshot } = this.get(id);
     return structuredClone(snapshot);
   }
 
@@ -359,6 +376,8 @@ export class Agents {
 
   async stop(id: string): Promise<void> {
     const c = this.get(id);
+    this.clearReminder(c);
+    try { this.cancelReminder?.(id); } catch (error) { console.error('Subagent reminder cancellation failed:', error); }
     c.status = 'stopped';
     // Keep what the child had produced so stop-then-read is still useful.
     if (c.streaming) { c.interrupted = messageText(c.streaming); c.interruptedMessage = c.streaming; }
@@ -398,6 +417,7 @@ export class Agents {
   }
   private failed(c: Child, error: unknown) {
     if (c.status === 'stopped' || c.status === 'failed') return;
+    this.clearReminder(c);
     if (c.streaming) { c.interrupted = messageText(c.streaming); c.interruptedMessage = c.streaming; }
     if (c.pendingStart) { c.result = undefined; c.interrupted = undefined; c.interruptedMessage = undefined; c.pendingStart = false; }
     c.status = 'failed'; c.error = String(error instanceof Error ? error.message : error); c.streaming = undefined;
@@ -429,6 +449,10 @@ export class Agents {
         c.sequence = (c.sequence ?? 0) + 1; c.pendingStart = false;
         c.status = 'running'; c.error = undefined; c.result = undefined;
         c.interrupted = undefined; c.interruptedMessage = undefined;
+        if (c.reminder === undefined) {
+          c.activeSince ??= Date.now();
+          this.armReminder(c);
+        }
         this.changed(c.id);
         break;
       case 'message_start':
@@ -455,6 +479,7 @@ export class Agents {
       }
       case 'agent_settled': {
         c.sequence = (c.sequence ?? 0) + 1; c.pendingStart = false;
+        this.clearReminder(c);
         const last = c.messages.findLast(m => m.role === 'assistant');
         c.result = messageText(last) || '(no assistant text)';
         c.error = last?.errorMessage ?? (e.aborted ? 'Child run aborted.' : last?.stopReason === 'error' ? 'Child provider failed.' : undefined);
@@ -469,6 +494,24 @@ export class Agents {
       }
     }
     this.changed(c.id);
+  }
+
+  private armReminder(c: Child) {
+    if (this.reminderMs <= 0 || c.reminder !== undefined) return;
+    c.reminder = setTimeout(() => {
+      c.reminder = undefined;
+      if (this.children.get(c.id) !== c || (c.status !== 'starting' && c.status !== 'running')) return;
+      const minutes = Math.max(1, Math.round((Date.now() - (c.activeSince ?? Date.now())) / 60_000));
+      try { this.remind?.(c.id, minutes); } catch (error) { console.error('Subagent reminder delivery failed:', error); }
+      if (this.children.get(c.id) === c && (c.status === 'starting' || c.status === 'running')) this.armReminder(c);
+    }, this.reminderMs);
+    c.reminder.unref?.();
+  }
+
+  private clearReminder(c: Child) {
+    if (c.reminder !== undefined) clearTimeout(c.reminder);
+    c.reminder = undefined;
+    c.activeSince = undefined;
   }
 }
 

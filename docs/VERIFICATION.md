@@ -506,3 +506,33 @@ pushed, tagged or published during this review/fix round.
   child completion without interrupting the parent, and explicit `read`.
 - The full deterministic suite passed **73/73**. Version is `0.2.1`; this change
   is local and unpublished until the operator tags/releases it.
+
+### Preset discovery, running reminders and timestamped ids (0.2.2)
+
+- `subagent({ action: "list" })` now appends a compact `Presets: ...` line with a
+  cap of 20 names; `presets` remains the full-detail action. A static tool
+  `promptGuidelines` entry tells the model to check `list` or `presets` before
+  choosing one, so discovery happens before the spawn call.
+- Each child gets one unref'd reminder timer in `Agents`, anchored when the child
+  is spawned (including `starting`) and armed on `agent_start` only if no timer
+  exists, so steering, retries and continuation starts do not reset the clock.
+  It fires every 10 minutes while the child is `starting` or `running`, with a
+  minimum reported value of 1 minute, and is cleared on settlement, failure,
+  stop, spawn failure and shutdown.
+- The notifier holds completions plus a per-child latest reminder. `remind()`
+  uses the same idle scheduling as `add()` and wakes an idle parent; a completion
+  or `cancel()` removes that child's queued reminder, and a later reminder
+  replaces the earlier one. One flush renders both kinds in a single
+  `<system-notification>`; the retention footer is added only when a completion
+  is present. Notices are sent as `customType: "mini-subagent-notice"` with the
+  existing `triggerTurn`/`steer` options.
+- Child ids are now `j<counter>-<base36 milliseconds>`, for example
+  `j1-mg2k4x9p`; the counter keeps a registry collision-free and the timestamp
+  prevents `j1` reuse after restart/resume. Tests, native mock-provider fixtures,
+  PTY/live probes and docs use the full id; there are no bare-counter aliases.
+- `promptGuidelines` and preset-name listing are unit tested, reminder lifecycle
+  and notifier coalescing are covered in `agents.test.ts`/`extension.test.ts`,
+  and the native TUI probe passes with the timestamped id. `node
+  scripts/probe-tui.ts` passed after the change.
+- The full deterministic suite passed **76/76**; `git diff --check` is clean.
+  Version is `0.2.2`; nothing is tagged or published by this work.

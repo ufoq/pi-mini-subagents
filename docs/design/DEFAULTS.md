@@ -16,7 +16,7 @@ or a shared blueprint.
 | --- | --- |
 | Project identity | Repository project: `pi-mini-subagents`; npm package: `@ufoq/pi-mini-subagents`. Canonical upstream: `https://github.com/ufoq/pi-mini-subagents`; local Git server is the development copy. |
 | Packaging | Our own Pi extension, shared by exclusive native TUI and RPC parent modes. |
-| Workers | Persistent Pi RPC subprocesses. Launch returns an id immediately; parent keeps working. |
+| Workers | Persistent Pi RPC subprocesses. Launch returns an id immediately (`j1-<base36 ms>`); parent keeps working. |
 | State | One plain in-memory registry of child handles and conversation/progress data. No custom state/result directories or daemon. |
 | Initial context | Fresh conversation plus the parent's task brief; parent model/thinking by default, with optional per-spawn `model`, `thinking` and `tools` overrides. No transcript fork. |
 | Tools and permissions | Ordinary coding tools. Parent states allowed actions, read-only intent, file ownership, etc. in the task prompt. No permission profiles or enforcement machinery. Prompt restrictions are instructions, not a sandbox. |
@@ -25,7 +25,7 @@ or a shared blueprint.
 | Workspace | Same working directory. Parent coordinates assignments in prompts; no writer locks or automatic worktrees. |
 | Steering/follow-up | Send input to the same child using Pi's native prompt/steering behavior. A finished turn does not destroy the conversation. |
 | Observation | Child list, existing messages/tool activity, then live events. Agent and human controls use the same registry. Human viewing adds nothing to parent model context. |
-| Completion | Send only a concise `<system-notification>` that the child finished and its result is available. Include the child id, not the result body. Busy-parent notices are coalesced and delivered at the next message boundary with `steer`; an idle parent is woken after a short burst window. Parent retrieves results when needed. |
+| Completion | Send only a concise `<system-notification>` that the child finished and its result is available. Include the child id, not the result body. Busy-parent notices are coalesced and delivered at the next message boundary with `steer`; an idle parent is woken after a short burst window. A child that stays `starting`/`running` for 10 minutes emits a notification-only reminder every 10 minutes until it settles or is stopped. Parent retrieves results when needed. |
 | Stop | Direct child stop/termination control, independent of the parent's Escape behavior. |
 | History | A parent keeps its ordinary Pi transcript; children are ephemeral (`--no-session`) and leave nothing on disk. No separate orchestration persistence or recovery. |
 | Cleanup | Basic child-process cleanup when the extension shuts down. No elaborate session/branch handoff machinery. |
@@ -35,15 +35,16 @@ not a new privileged message role. Example:
 
 ```text
 <system-notification>
-Subagent j1 finished. Its result is available; retrieve it when needed.
+Subagent j1-mg2k4x9p finished. Its result is available; retrieve it when needed.
 </system-notification>
 ```
 
 Use Pi's `steer` delivery so busy-parent notices enter at the next message
 boundary instead of waiting for the whole run; coalesce pending notices into one
 message and use a short idle window to batch near-simultaneous completions.
-Results/errors stay with the child for explicit retrieval through the existing
-inspection surface. Do not automatically inject
+Long-running reminders share the notifier, replace older reminders for the same
+child, and are removed by completion or stop. Results/errors stay with the child
+for explicit retrieval through the existing inspection surface. Do not automatically inject
 result bodies, progress streams or child transcripts into parent context.
 
 ## Explicitly out of v1
@@ -51,7 +52,8 @@ result bodies, progress streams or child transcripts into parent context.
 - Concurrency limits, admission queues and scheduling: the parent model decides
   how many workers to start.
 - Request/token budgets, wrap-up counters and forced-yield policies.
-- Automatic runtime deadlines, idle timeouts or watchdogs. Stop is explicit.
+- Automatic task deadlines, idle eviction, auto-stop or auto-reassignment. Stop
+  is explicit. The 10-minute reminder is notification-only.
 - Read-only enforcement, tool-permission profiles and file ownership locks.
 - Parent Escape interception, stop/resume propagation and auto-wake suppression.
 - Retry/outbox ledgers, delivery acknowledgments or expensive lifecycle checks

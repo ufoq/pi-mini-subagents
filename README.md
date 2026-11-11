@@ -54,9 +54,9 @@ subagent({ action: "spawn" | "list" | "read" | "send" | "stop" | "presets",
 
 | Action | Required input | Effect |
 | --- | --- | --- |
-| `spawn` | `message` task brief | Returns `j1 starting` immediately, before startup completes. Optional `preset` supplies launch defaults; `model`, `thinking` and `tools` override the same preset fields for this child only. |
-| `presets` | — | Lists valid user/project presets and malformed preset files. Does not start a child. |
-| `list` | — | Short ids, states, preset names and task labels; no transcripts. Adds a reminder that settled children retain memory until parent shutdown, while `subagent stop` releases any live process. |
+| `spawn` | `message` task brief | Returns `j1-mg2k4x9p starting` immediately, before startup completes. Optional `preset` supplies launch defaults; `model`, `thinking` and `tools` override the same preset fields for this child only. |
+| `presets` | — | Lists valid user/project presets with defaults and malformed preset files. Does not start a child. |
+| `list` | — | Short ids, states, preset names and task labels; no transcripts. Also shows available preset names. Adds a reminder that settled children retain memory until parent shutdown, while `subagent stop` releases any live process. |
 | `read` | `id` | Latest result/diagnostic, or an attributed transcript (`assistant:`, `tool bash:`, `user:`) while running or after stop. Settled reads end with a retention/stop reminder. Bounded to about 8,000 characters. |
 | `send` | `id`, `message` | Same child/context. Native steering when busy, new turn when idle. |
 | `stop` | `id` | Explicitly terminates the owned process tree; id remains inspectable. |
@@ -71,7 +71,7 @@ On settlement or process failure, the only automatic parent-context message is:
 
 ```text
 <system-notification>
-Subagent j1 finished. Result/diagnostic available; use subagent read when needed. Settled children stay in memory; subagent stop releases any live child process.
+Subagent j1-mg2k4x9p finished. Result/diagnostic available; use subagent read when needed. Settled children stay in memory; subagent stop releases any live child process.
 </system-notification>
 ```
 
@@ -81,6 +81,20 @@ idle parent and, when busy, delivers at the next message boundary after the
 current assistant turn and its tool calls. Notices from the same turn are
 coalesced into one message; while idle, a short burst window batches
 near-simultaneous completions. The parent explicitly fetches results.
+
+A child still `starting` or `running` after 10 minutes produces a reminder at
+the same message boundary:
+
+```text
+<system-notification>
+Subagent j1-mg2k4x9p has been running for 10 minutes. Use subagent read to check progress; subagent stop if it is stuck.
+</system-notification>
+```
+
+The reminder repeats every 10 minutes until the child settles or is stopped. It
+is a notification, not a deadline: nothing is cancelled automatically. Reminders
+and completions share one message per burst; the latest reminder for a child
+replaces an older queued one, and a completion or stop removes it.
 Explicit stop/shutdown does not send a completion wakeup. Submission through
 Pi's void API is not a delivery/consumption acknowledgment.
 
@@ -141,15 +155,16 @@ subagent({ action: "spawn", preset: "oracle", tools: "read",
            message: "Answer with one file: rpc.ts" })
 ```
 
-Use `subagent({ action: "presets" })` to discover available names and see invalid
-files. Unknown or invalid presets fail before any process starts.
+Use `subagent({ action: "presets" })` for full details and invalid files, or
+`subagent({ action: "list" })` for a compact name list. Unknown or invalid
+presets fail before any process starts.
 
 ## Human controls: `/agents`
 
-- `/agents` opens the existing child list, newest child first (`j7` above `j1`).
-  Up/down selects; Enter opens. Rows and the detail heading show the preset name
-  when one was used.
-- `/agents j1` directly opens that child when it exists.
+- `/agents` opens the existing child list, newest child first (`j2-...` above
+  `j1-...`). Up/down selects; Enter opens. Rows and the detail heading show the
+  preset name when one was used.
+- `/agents j1-mg2k4x9p` directly opens that child when it exists.
 - The conversation shows earlier user/assistant messages, thinking, tool
   arguments/results, and live assistant/tool updates using public Pi renderers.
 - Type at the **>** prompt and press Enter to send to that same child; the status
@@ -164,6 +179,11 @@ Human viewing never sends child history into parent model context. Images are
 not displayed; text results and native truncation/full-output-path notices are.
 Observer rows do not start execution clocks, so closing them leaves no renderer
 timers behind.
+
+Child ids use a session counter plus a base36 millisecond timestamp, for example
+`j1-mg2k4x9p`. A restarted or resumed parent session cannot silently reuse an
+old `j1`. Ids are opaque: pass the full id to `read`, `send` or `stop`; there are
+no bare-counter aliases.
 
 `/agents` is guarded by `ctx.mode === "tui"`. In RPC mode it emits only an
 informational UI notification; model controls, children and completion delivery
@@ -204,6 +224,7 @@ controls are separate from the TUI for a later explicit adapter.
   A 300 ms termination grace precedes hard-kill cleanup; it is not a task deadline.
 - No concurrency cap, admission queue, budget, automatic task deadline, writer
   lock, worktree, recursion framework, permission profile or parent-Escape policy.
+  The 10-minute reminder is notification-only and never stops or reassigns a child.
 
 ## Development
 

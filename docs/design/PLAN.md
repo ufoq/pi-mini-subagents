@@ -42,8 +42,8 @@ Parent Pi: native TUI OR native RPC
   our extension
     compact model tool ----+
     /agents human viewer --+-- one in-memory controller
-                              |-- persistent Pi RPC child j1
-                              |-- persistent Pi RPC child j2
+                              |-- persistent Pi RPC child j1-<base36 ms>
+                              |-- persistent Pi RPC child j2-<base36 ms>
                               +-- completion notices to parent
 ```
 
@@ -99,13 +99,14 @@ subagent({ action: "spawn" | "list" | "read" | "send" | "stop" | "presets",
 | Action | Meaning |
 | --- | --- |
 | `spawn` | `message` is the task brief. Register/start a child and return its id immediately; do not await its model run. Optional `preset` supplies launch defaults; explicit `model`, `thinking` and `tools` override the matching preset fields. |
-| `presets` | List valid user/project presets and malformed files. |
-| `list` | Return ids, short task labels, preset names and current state, not transcripts. |
+| `presets` | List valid user/project presets, their defaults and malformed files. |
+| `list` | Return ids, short task labels, preset names and current state, not transcripts; append available preset names. |
 | `read` | Return the identified child's latest result/error; while working, return a short recent-activity view. No status-polling requirement. |
 | `send` | Deliver `message` to the same conversation, steering when busy or starting a new turn when idle. |
 | `stop` | Terminate that child and release its process resources. This is not parent Escape handling. |
 
-Validate required fields and unknown ids. Keep descriptions and results short.
+Validate required fields and unknown ids. Ids are `j<counter>-<base36 ms>` and
+opaque; no bare-counter aliases. Keep descriptions and results short.
 A bounded model-facing read is output/context hygiene, not a request budget.
 The human viewer can inspect the full conversation independently.
 
@@ -157,7 +158,7 @@ Use one short custom message through `pi.sendMessage`, with `display: true`,
 
 ```text
 <system-notification>
-Subagent j1 finished. Its result is available; retrieve it when needed.
+Subagent j1-mg2k4x9p finished. Its result is available; retrieve it when needed.
 </system-notification>
 ```
 
@@ -166,7 +167,9 @@ fetches them through `read`. While the parent is busy, coalesce pending notices
 and flush them as one message at `turn_end`, the next `agent_start`, a compaction
 boundary or `agent_end`, so they arrive at the next message boundary; when idle,
 use a short timer to batch near-simultaneous completions and wake the parent.
-No Escape policy, retry/outbox ledger, delivery acknowledgment or continuation
+A child still `starting`/`running` after 10 minutes queues a notification-only
+reminder every 10 minutes; it shares the notifier, replaces the older reminder
+for that child, and is removed by completion or stop. No Escape policy, retry/outbox ledger, delivery acknowledgment or continuation
 loop. The API returns void; do not claim submission proves model consumption.
 
 For process ownership, use a small native-RPC transport in `rpc.ts`, with strict

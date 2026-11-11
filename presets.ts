@@ -198,3 +198,12 @@ export function presetsReply(discovery: PresetDiscovery): string {
   for (const error of discovery.errors) lines.push(`invalid ${label(error.filePath)}: ${label(error.message)}`);
   return lines.join('\n');
 }
+
+/** Compact preset names for the `list` action; full details stay in `presets`. */
+export function presetNamesLine(discovery: PresetDiscovery): string {
+  if (!discovery.presets.length) return 'Presets: none.';
+  const names = discovery.presets.map(preset => preset.name);
+  const shown = names.slice(0, 20);
+  const more = names.length > shown.length ? `, +${names.length - shown.length} more` : '';
+  return `Presets: ${shown.join(', ')}${more} (call presets for details).`;
+}

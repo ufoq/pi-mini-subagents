@@ -64,7 +64,7 @@ async function closeViewer() {
   input('\u001b'); await new Promise(r => setTimeout(r, 60));
   input('\u001b'); await new Promise(r => setTimeout(r, 150));
 }
-const notices = () => (screen().match(/Subagent j1 finished/g) ?? []).length;
+const notices = () => (screen().match(/Subagent j\d+-[a-z0-9]+ finished/g) ?? []).length;
 try {
   await until(() => raw.includes('π - work'), 'native TUI startup title');
   await until(() => tail(3000).includes(model.split('/').at(-1)!), 'powerline footer renders model');
@@ -85,11 +85,13 @@ try {
     if (!listed) { input('\u001b'); await new Promise(r => setTimeout(r, 400)); }
   }
   assert.ok(listed, `child never appeared in list\n${tail(4000)}`);
+  const childId = /(j\d+-[a-z0-9]+)/.exec(tail(2000))?.[1];
+  assert.ok(childId, 'child id visible in list');
   input('\u001b');
   await new Promise(r => setTimeout(r, 150));
   let opened = false;
   for (let i = 0; i < 40 && !opened; i++) {
-    input('/agents j1\r');
+    input(`/agents ${childId}\r`);
     for (let j = 0; j < 10 && !opened; j++) {
       await new Promise(r => setTimeout(r, 200));
       if (tail(1500).includes('Steer>')) opened = true;
@@ -104,17 +106,17 @@ try {
   await closeViewer();
   await until(() => notices() >= 1, 'completion notice in parent chat');
 
-  input('Call subagent read for j1 now, then reply READ_OK. Do not stop it.\r');
+  input(`Call subagent read for ${childId} now, then reply READ_OK. Do not stop it.\r`);
   await until(() => screen().includes('CHILD_READY'), 'explicit initial read');
-  input(`Call subagent send for j1 with message: "What word did I ask you to remember?" Then reply SENT.\r`);
+  input(`Call subagent send for ${childId} with message: "What word did I ask you to remember?" Then reply SENT.\r`);
   await until(() => notices() >= 2, 'follow-up completion notice');
-  input('Call subagent read for j1 and state the remembered word, then reply READ_OK.\r');
+  input(`Call subagent read for ${childId} and state the remembered word, then reply READ_OK.\r`);
   await until(() => screen().includes(token), 'retained child context');
 
-  input('/agents j1\r');
+  input(`/agents ${childId}\r`);
   await until(() => tail(1500).includes('Steer>'), 'reopen same child');
   input('\u0018');
-  await until(() => screen().includes('j1 stopped'), 'human explicit stop');
+  await until(() => screen().includes(`${childId} stopped`), 'human explicit stop');
   await closeViewer();
   input('/quit\r');
   await until(() => !!exit, 'TUI orderly exit');

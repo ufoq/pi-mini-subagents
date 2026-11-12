@@ -7,6 +7,8 @@
 - Re-verified compatibility with Pi 1.5.2 on Node 24.20.0: local and disposable
   lease suites pass, with no runtime code changes.
 - Documented project-preset trust decisions and Pi 1.5.1+ idle cache warming.
+- Consolidated current design into `docs/DESIGN.md`; removed the retired
+  implementation plan, handoff and pre-implementation research snapshots.
 - Added this changelog to the package payload for Pi's Extension Updates notice.
 
 ## [0.2.3] - 2026-11-11

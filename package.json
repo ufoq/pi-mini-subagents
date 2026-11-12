@@ -36,6 +36,7 @@
     "viewer.ts",
     "README.md",
     "CHANGELOG.md",
+    "docs/DESIGN.md",
     "LICENSE"
   ],
   "scripts": {

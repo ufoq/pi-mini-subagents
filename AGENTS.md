@@ -2,15 +2,15 @@
 
 ## Mission and authoritative documents
 
-Implement a small Pi extension, not an orchestration framework. Read in order:
+Maintain a small Pi extension, not an orchestration framework. Read in order:
 
-1. `HANDOFF.md`
-2. `docs/design/DEFAULTS.md`
-3. `docs/design/FEATURES.md`
-4. `docs/design/PLAN.md`
+1. `README.md`
+2. `docs/DESIGN.md`
+3. `CHANGELOG.md`
 
-These current decisions override older research/options. Keep the first working
-slice simple; do not restart the architecture survey or adopt a framework.
+These current documents supersede older planning/research notes; those are kept
+only in Git history. Keep the implementation simple and do not reintroduce the
+architecture survey or adopt a framework.
 
 ## Project identity
 
@@ -70,5 +70,5 @@ slice simple; do not restart the architecture survey or adopt a framework.
 - Keep live provider calls separate from offline tests and record what was
   actually verified. A successful prompt submission is not task completion.
 - Keep scratch data/logs in `tmp/` (ignored), not custom runtime state directories.
-- Preserve unrelated edits, make small commits, and keep README/plan checkboxes
+- Preserve unrelated edits, make small commits, and keep README and design docs
   honest about implemented versus planned features.

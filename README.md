@@ -59,17 +59,18 @@ subagent({ action: "spawn" | "list" | "read" | "send" | "stop" | "remove" | "pre
 | `presets` | — | Lists valid user/project presets with defaults and malformed preset files. Does not start a child. |
 | `list` | — | Short ids, `active`/`stopped` state, preset names and task labels; no transcripts. Also shows available preset names and reminds that `remove` releases a stopped child. |
 | `read` | `id` | Latest result/diagnostic, or an attributed transcript (`assistant:`, `tool bash:`, `user:`). Works while active and after stop; stopped output is retained until `remove` or parent shutdown. Bounded to about 8,000 characters. |
-| `send` | `id`, `message` | Same child/context. Native steering while `active`; a `stopped` child starts a new turn in the same process. |
+| `send` | `id`, `message` | Same child/context. Native steering while `active`; a `stopped` child with a live process starts a new turn. A stopped child whose process died can be read, but cannot resume; `read` it and `remove` it. |
 | `stop` | `id` | Aborts the current turn with Pi `clear_queue` + `abort`, keeps the process/context, and retains the partial answer. Idempotent; no completion notice. |
 | `remove` | `id` | Kills the process and deletes the transcript and id. Allowed in either state; frees a registry slot immediately. |
 
-A natural turn settles the child to `stopped`, not destroyed: the process and
-context stay alive for `send`, and `read` still works. `stopped` does not imply
-success; the completion notice outcome is `finished` or `failed`, and failures
-retain diagnostics for `read`. `stop` aborts a turn but also leaves the child
-`stopped` and resumable. `remove` is the only operation that releases the
-process and transcript. A rejected steering command is reported to its caller,
-not treated as proof that the existing work stopped.
+A natural turn settles the child to `stopped`, not destroyed: while its process
+remains alive, the process and context stay available for `send`, and `read`
+still works. `stopped` does not imply success; the completion notice outcome is
+`finished` or `failed`, and failures retain diagnostics for `read`. `stop` aborts
+a turn but also leaves the child `stopped` and resumable while the process is
+alive. `remove` is the only operation that releases the process and transcript. A
+rejected steering command is reported to its caller, not treated as proof that
+the existing work stopped.
 
 On settlement or process failure, the only automatic parent-context message is:
 
@@ -79,9 +80,9 @@ Subagent j1-mg2k4x9p finished. Result/diagnostic available; use subagent read wh
 </system-notification>
 ```
 
-It contains identity, outcome and result availability, never result bodies,
-progress or diagnostics (a short failure diagnostic may accompany a failed
-notice). Pi's `triggerTurn: true`, `deliverAs: "steer"` delivery wakes an
+It contains identity, outcome and result availability. It never contains result
+bodies or progress; a failed notice may include a short sanitized diagnostic. Pi's
+`triggerTurn: true`, `deliverAs: "steer"` delivery wakes an
 idle parent and, when busy, delivers at the next message boundary after the
 current assistant turn and its tool calls. Notices from the same turn are
 coalesced into one message; while idle, a short burst window batches
@@ -203,17 +204,18 @@ controls are separate from the TUI for a later explicit adapter.
   `spawn` may override `model`, `thinking` and `tools`, or apply those defaults
   from a named preset. The remaining launch configuration is fixed. Follow-up
   reuses that child. No parent-transcript fork.
-- Children inherit the parent's tools, skills, prompt templates and themes, but
-  not its extensions: all built-in coding tools (`read`, `bash`/`powershell`,
-  `edit`, `write`, `grep`, `find`, `ls`) and skills such as `web-search` are
-  available. Extensions stay off, and because Pi implements MCP as a built-in
-  extension, MCP is not available in children either. That also means no
-  `subagent` tool, so a child cannot delegate. Project instruction discovery stays
-  enabled. Children run with `--no-session`, so their conversations never appear
-  in Pi's `/resume` picker and write no transcript; inspect them live in
-  `/agents` or with `subagent read`. RPC children cannot answer Pi's project-trust
-  prompt, so trust-gated project skills load only when a saved decision or
-  `defaultProjectTrust` allows them; user-level skills always load.
+- Children do **not** inherit the parent's selected tool subset. Unless a preset
+  or spawn argument supplies `tools`, they launch with all built-in coding tools
+  (`read`, `bash`/`powershell`, `edit`, `write`, `grep`, `find`, `ls`). Skills,
+  prompt templates and themes are inherited. Extensions stay off, and because Pi
+  implements MCP as a built-in extension, MCP is not available in children
+  either. That also means no `subagent` tool, so a child cannot delegate.
+  Project instruction discovery stays enabled. Children run with `--no-session`,
+  so their conversations never appear in Pi's `/resume` picker and write no
+  transcript; inspect them live in `/agents` or with `subagent read`. RPC children
+  cannot answer Pi's project-trust prompt, so trust-gated project skills load only
+  when a saved decision or `defaultProjectTrust` allows them; user-level skills
+  always load.
 - **Prompt restrictions are not a sandbox.** State read-only intent, allowed
   files/actions and ownership in the task brief. Children can mutate the shared
   workspace and use the parent's configured credentials/network access.
@@ -269,60 +271,22 @@ them private. Do not copy auth stores or session logs into published artifacts.
 
 ### Verification
 
-Actually executed during development:
+Current baseline: Pi **1.4.0** and **1.5.2**, Node **24.20.0**, Linux.
 
-- Offline transport/controller tests: immediate launch, split UTF-8 and LF-only
-  framing, concurrent request correlation, command/protocol/provider/process
-  errors, eight-child admission and ninth rejection, bounded reads, same-child steering/
-  follow-up, and termination of an owned detached TERM-resistant descendant.
-- Viewer component tests: late snapshot, live tool output, widths 12/30/80,
-  long output, scrolling, close/reopen, steering and stop; no parent-context
-  traffic from observation.
-- Native Pi + mock provider, **RPC**: real tool execution, idle wake, busy queued
-  completion, explicit read, ordinary child tools, retained follow-up and parent
-  EOF shutdown with an active child.
-- Native Pi + mock provider, **TUI**: actual PTY, `/agents` list/conversation/live
-  bash output, human steering, close/reopen, resize/scroll, idle wake, explicit
-  read, follow-up and human stop.
-- Real provider (**an earlier small live route**, since repointed upstream), native RPC: actual successful child
-  bash result (`CHILD_TOOL_OKCHILD_TOOL_DONE`), result-free notification after the
-  parent settled, explicit read, remembered random word on follow-up in one child
-  transcript, and explicit stop. Parent/child reported tokens including cache:
-  **14,426 / 9,797**.
-- Real provider **DeepSeek V4.1 Flash** (Ollama Cloud route), native RPC as a
-  **fresh Unix user**, isolated HOME/Pi/XDG/cwd, minimal environment,
-  and extracted package tarball: loading/READY, actual bash result, idle wake,
-  explicit reads, retained context and stop all passed. Pinned Pi 1.4.0 was
-  observed in the child's argv. A test-only relay verified **16 HTTP 200**
-  responses with the exact requested/returned DeepSeek model. Total usage:
-  **21,609 tokens including cache** (474 output; 16,816 cached input). Temporary
-  test account/home and selected-provider credential config were removed.
-- Deployment rehearsal (private registry + disposable container): published
-  `0.1.0` to a private registry, installed it with `pi install
-  npm:pi-mini-subagents` into a disposable Ubuntu 24.04 container (Node 24.22.2,
-  Pi 1.4.0), and passed a clean-room RPC smoke using the installed package only.
-  The container was deleted afterwards; nothing was published to npmjs. A later
-  unpublish + republish of `0.1.0` also succeeded on the private registry (its
-  artifacts are disposable; public npmjs is never writable from here).
-- Real provider **DeepSeek V4.1 Flash**, native **TUI** (real PTY): spawn and
-  immediate parent return, existing/live activity in `/agents`, rendered steering,
-  notice-only completion, explicit read, retained word after steering plus
-  follow-up, human stop, clean exit.
-- Same real-model TUI loop with third-party extensions loaded (powerline footer,
-  a context extension, a terminal bundle) in an isolated temp agent dir: viewer
-  open/close, editor and exit remain functional; no extension load failure.
-- Pi **1.5.2** compatibility re-check (2026-11-12): local deterministic suite
-  **86/86** and native TUI mock probe pass; a fresh disposable lease (Node
-  24.20.0, Pi 1.5.2) passed the same suite **86/86**. The lease TUI probe's
-  "reopen same child" step failed with both Pi 1.4.0 and 1.5.2 in that lease,
-  while local TUI probes pass on both; no 1.5.2-specific regression was found.
-  No live provider calls were made.
-- `npm pack --dry-run --json`: payload includes only source modules, package
-  metadata, README, LICENSE and CHANGELOG; not tests, fixtures, scratch logs or
-  design research.
+- Deterministic offline suite: **86/86** on Pi 1.5.2, including native RPC parent
+  processes against a mock provider; the native TUI mock probe passes.
+- Installed-package lease check: Ubuntu 24.04.5, Node 24.20.0, Pi 1.5.2, and
+  `@ufoq/pi-mini-subagents@0.2.4`; the full suite passed **86/86**. The lease TUI
+  probe's "reopen same child" step failed with both Pi 1.4.0 and 1.5.2 in that
+  lease; local TUI probes pass on both, so no lease TUI pass is claimed.
+- Earlier real-provider and third-party-extension probes ran on Pi 1.4.0 and are
+  historical, not 1.5.2 validation. No live-provider calls were made on 1.5.2.
+- `npm pack --dry-run --json`: payload includes source modules, package metadata,
+  README, DESIGN, LICENSE and CHANGELOG; not tests, fixtures, scratch logs or
+  research notes.
 
-See [docs/VERIFICATION.md](docs/VERIFICATION.md) for evidence/limitations and the
-[implementation plan](docs/design/PLAN.md) for the original acceptance gates.
+Current architecture and invariants are in
+[docs/DESIGN.md](docs/DESIGN.md).
 
 ## Remaining limitations
 
@@ -356,9 +320,8 @@ appears. The guard (`event.messageType === "custom"`) is present from 0.22.0;
 upgrade that extension to avoid the noise. No dashboard, publication or rollout
 is included.
 
-Authoritative scope: [HANDOFF.md](HANDOFF.md), [DEFAULTS.md](docs/design/DEFAULTS.md),
-[FEATURES.md](docs/design/FEATURES.md), [PLAN.md](docs/design/PLAN.md). Research is
-optional reference material, not an additional feature checklist.
+Current design and scope: [docs/DESIGN.md](docs/DESIGN.md). This README is the
+usage reference; [CHANGELOG.md](CHANGELOG.md) records release changes.
 
 ## License
 

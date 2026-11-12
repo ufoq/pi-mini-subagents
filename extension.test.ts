@@ -31,6 +31,8 @@ test('one compact tool, actionable validation, exact completion-only delivery an
   assert.ok(tools[0].parameters.properties.thinking);
   assert.ok(tools[0].parameters.properties.tools);
   assert.match(tools[0].promptGuidelines.join(' '), /list.*presets/i);
+  assert.match(tools[0].promptGuidelines.join(' '), /bash sleep/i);
+  assert.match(tools[0].promptGuidelines.join(' '), /end the turn/i);
   assert.equal(tools[0].parameters.properties.system_append, undefined, 'system_append is preset-only, never a tool argument');
   const ctx = { mode: 'rpc', cwd: process.cwd(), isProjectTrusted: () => false, ui: { notify() {}, custom() { assert.fail('terminal UI in RPC'); } } };
   await handlers.get('session_start')({}, ctx);
@@ -48,7 +50,7 @@ test('one compact tool, actionable validation, exact completion-only delivery an
   const reminder = noticeNotification([{ id: 'j1-abc', minutes: 10 }]);
   assert.match(reminder, /has been running for 10 minutes/);
   assert.ok(!reminder.includes('Settled children stay in memory'));
-  assert.equal(startingReply('j1'), 'j1 active. Parent may continue; completion will notify. Results require read.');
+  assert.equal(startingReply('j1'), 'j1 active. Continue independent work. When only subagent-dependent work remains, end your turn; do not wait with shell sleep or polling. Completion will wake you; use subagent read for results.');
   assert.match(startingReply('j1', { provider: 'mock', id: 'alias/model' }), /active on mock\/alias\/model/);
   assert.match(startingReply('j1', { provider: 'mock', id: 'mock' }, 'oracle'), /^j1 active \(oracle\) on mock\/mock\./);
   assert.match(listReply([{ id: 'j1', status: 'stopped', task: 'review', preset: 'oracle' }]), /j1 stopped \(oracle\): review/);

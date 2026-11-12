@@ -92,7 +92,7 @@ export function createCompletionNotifier(send: (notices: Notice[]) => void, dela
 }
 
 export function startingReply(id: string, model?: { provider: string; id: string }, preset?: string) {
-  return `${id} active${preset ? ` (${sanitize(preset)})` : ''}${model ? ` on ${sanitize(model.provider)}/${sanitize(model.id)}` : ''}. Parent may continue; completion will notify. Results require read.`;
+  return `${id} active${preset ? ` (${sanitize(preset)})` : ''}${model ? ` on ${sanitize(model.provider)}/${sanitize(model.id)}` : ''}. Continue independent work. When only subagent-dependent work remains, end your turn; do not wait with shell sleep or polling. Completion will wake you; use subagent read for results.`;
 }
 
 export function listReply(rows: { id: string; status: Status; task: string; preset?: string }[], presets?: string) {
@@ -143,7 +143,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: 'subagent', label: 'Subagent',
     description: 'Persistent background Pi children in this cwd. spawn: task in message; optional preset supplies launch defaults; model/thinking/tools override them. list: children and available preset names; presets: full preset details. read: result/error or attributed recent activity; send: steer/follow up in the same conversation; stop: abort the current turn but keep the child; remove: kill the process and delete the transcript. Completion notifies without results. Put restrictions/file ownership in task prompts, not enforced here.',
-    promptGuidelines: ['Call subagent({ action: "list" }) or subagent({ action: "presets" }) before choosing a preset; no presets are built in.'],
+    promptGuidelines: ['Call subagent({ action: "list" }) or subagent({ action: "presets" }) before choosing a preset; no presets are built in.', 'Never wait for subagent work with bash sleep or repeated list/read polling. Continue independent work; when only child-dependent work remains, end the turn — the completion notice starts a new turn.'],
     parameters: Type.Object({
       action: StringEnum(['spawn', 'list', 'read', 'send', 'stop', 'remove', 'presets'] as const),
       id: Type.Optional(Type.String()),

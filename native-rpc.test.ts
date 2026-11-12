@@ -48,9 +48,15 @@ test('native RPC parent: immediate launch, idle wake, explicit read, busy follow
     assert.equal(events.filter(e => e.type === 'extension_ui_request' && e.method !== 'notify').length, 0);
     await prompt('DELEGATE');
     await until(() => settled() === 1 && mock.childPending.length === 1, 'parent continues before child finishes');
+    const parentRequest = mock.requests.find(r => r.tools?.some((t: any) => t.function?.name === 'subagent'));
+    assert.ok(parentRequest, 'parent request captured');
+    assert.match(JSON.stringify(parentRequest.messages), /bash sleep/, 'wait guidance reaches the parent system prompt');
+    assert.match(JSON.stringify(parentRequest.messages), /end the turn/);
     assert.equal(notifications().length, 0);
     const startText = events.filter(e => e.type === 'tool_execution_end').map(text).find(value => /j\d+-[a-z0-9]+ active/.test(value));
     assert.ok(startText, 'spawn reply contains a timestamped child id');
+    assert.match(startText, /end your turn/);
+    assert.match(startText, /shell sleep/);
     const childId = /(j\d+-[a-z0-9]+) active/.exec(startText)![1];
     assert.ok(events.some(e => e.type === 'message_end' && text(e).includes('PARENT_CONTINUES')));
     mock.releaseChild(); // Child uses real native bash.

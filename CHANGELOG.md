@@ -4,8 +4,11 @@
 
 ### Changed
 
+- Added spawn-result and tool-guideline wording that tells the model to end its
+  turn instead of waiting for children with shell sleep or polling; completion
+  notices start a new turn.
 - Re-verified compatibility with Pi 1.5.2 on Node 24.20.0: local and disposable
-  lease suites pass, with no runtime code changes.
+  lease suites pass, with no Pi-compatibility code changes required.
 - Documented project-preset trust decisions and Pi 1.5.1+ idle cache warming.
 - Consolidated current design into `docs/DESIGN.md`; removed the retired
   implementation plan, handoff and pre-implementation research snapshots.

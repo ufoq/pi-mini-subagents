@@ -109,6 +109,10 @@ One compact `subagent` tool exposes `spawn`, `list`, `read`, `send`, `stop`,
 are: bounded reads, no automatic result/transcript injection, and no status-
 polling requirement.
 
+The spawn result and a static guideline tell the parent to continue independent
+work and to end the turn when only child-dependent work remains, rather than
+wait with shell sleep or polling; a completion notice starts a new turn.
+
 A completion notice contains identity, outcome and result availability. It never
 contains result bodies or progress; failures may include a short sanitized
 diagnostic. Notices use an ordinary Pi custom message with `triggerTurn: true`

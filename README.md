@@ -63,6 +63,11 @@ subagent({ action: "spawn" | "list" | "read" | "send" | "stop" | "remove" | "pre
 | `stop` | `id` | Aborts the current turn with Pi `clear_queue` + `abort`, keeps a live process/context, and retains the partial answer. Idempotent; no completion notice. |
 | `remove` | `id` | Kills the process and deletes the transcript and id. Allowed in either state; frees a registry slot immediately. |
 
+After `spawn` or `send`, continue independent work. When only child-dependent
+work remains, end the turn instead of waiting with shell `sleep` or repeated
+`list`/`read` polling; a completion notice starts a new turn and wakes an idle
+parent.
+
 A natural turn settles the child to `stopped`, not destroyed: while its process
 remains alive, the process and context stay available for `send`, and `read`
 still works. `stopped` does not imply success; the completion notice outcome is

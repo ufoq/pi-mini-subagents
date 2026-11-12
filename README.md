@@ -4,7 +4,7 @@ A small Pi extension for **persistent, observable and steerable background
 subagents**. One model-facing tool, one human viewer, one in-memory registry.
 No scheduler or orchestration framework.
 
-**Working vertical slice:** verified with Pi **1.4.0** and **1.5.2**, Node
+**Status:** verified with Pi **1.4.0** and **1.5.2**, Node
 **24.20.0**, Linux.
 Native TUI and native RPC parents load the same extension; children are persistent
 Pi RPC processes. See [verification](#verification) for what was actually tested.
@@ -60,7 +60,7 @@ subagent({ action: "spawn" | "list" | "read" | "send" | "stop" | "remove" | "pre
 | `list` | — | Short ids, `active`/`stopped` state, preset names and task labels; no transcripts. Also shows available preset names and reminds that `remove` releases a stopped child. |
 | `read` | `id` | Latest result/diagnostic, or an attributed transcript (`assistant:`, `tool bash:`, `user:`). Works while active and after stop; stopped output is retained until `remove` or parent shutdown. Bounded to about 8,000 characters. |
 | `send` | `id`, `message` | Same child/context. Native steering while `active`; a `stopped` child with a live process starts a new turn. A stopped child whose process died can be read, but cannot resume; `read` it and `remove` it. |
-| `stop` | `id` | Aborts the current turn with Pi `clear_queue` + `abort`, keeps the process/context, and retains the partial answer. Idempotent; no completion notice. |
+| `stop` | `id` | Aborts the current turn with Pi `clear_queue` + `abort`, keeps a live process/context, and retains the partial answer. Idempotent; no completion notice. |
 | `remove` | `id` | Kills the process and deletes the transcript and id. Allowed in either state; frees a registry slot immediately. |
 
 A natural turn settles the child to `stopped`, not destroyed: while its process
@@ -121,9 +121,10 @@ presets ship with the extension.
 
 Project presets follow Pi's own project-trust result. The extension adds no
 second trust rule. Pi treats a project whose only resource is
-`.pi/subagent-presets` as trusted unless Pi has a saved trust decision or an
-explicit approval override. Use user-level presets when repository presets
-should not override them.
+`.pi/subagent-presets` as trusted. On Pi 1.5.0+ a saved trust decision or
+explicit approval override prevails; on Pi 1.4.0 such a project is auto-trusted
+before saved decisions are consulted. Use user-level presets when repository
+presets should not override them.
 
 ```markdown
 ---
@@ -293,8 +294,9 @@ Current architecture and invariants are in
 Linux is the cleanup target; other OS process-tree behavior is not verified.
 Orderly stop/shutdown is covered, not recovery after parent SIGKILL/container
 loss, or deliberately daemonized/reparented descendants. There is no durable
-registry or cross-restart control. Stopped children stay alive (and resumable)
-until `subagent remove` or parent shutdown; there is no idle reaper. Histories
+registry or cross-restart control. Stopped children with a live process stay
+resumable until `subagent remove` or parent shutdown; a child whose process died
+remains readable but cannot resume. There is no idle reaper. Histories
 stay in memory until removal or shutdown, bounded only by the eight-entry cap;
 the simple viewer rebuilds on updates, and very large transcripts can cost memory
 and rendering time. Concurrent actors share native Pi steering semantics, not

@@ -30,9 +30,10 @@ architecture survey or adopt a framework.
   networking, credentials, or a shared blueprint.
 - Processes run as an unprivileged user with a disposable home. No host Docker
   socket is available or required; container lifecycle is an operator task.
-- Do not change globally installed Pi/extensions or deploy the prototype into
-  the development agent's own active extension runtime. Use explicit `-e`
-  loading in dedicated test sessions until an intentional install is requested.
+- Do not change globally installed Pi/extensions or deploy the development
+  extension into the development agent's own active extension runtime. Use
+  explicit `-e` loading in dedicated test sessions until an intentional install
+  is requested.
 - No automatic publication or rollout. Normal commits/pushes to this project's
   origin are allowed. Never force-push the protected default branch.
 
@@ -53,8 +54,8 @@ architecture survey or adopt a framework.
   worktrees, recursion framework, parent Escape policy, completion retry ledger,
   durable recovery, or full RPC/server implementation. Admission is capped at
   eight registry entries; `remove` frees a slot. `stop` aborts the current turn
-  but keeps the child resumable; only `remove`/shutdown release its process and
-  transcript.
+  but keeps a live child resumable; only `remove`/shutdown release its process
+  and transcript.
 - Basic validation, actionable errors and owned-process cleanup still apply.
 
 ## Engineering
@@ -63,7 +64,7 @@ architecture survey or adopt a framework.
   evidence shows it is necessary. No private-runtime casts or monkey patches.
 - Read the installed Pi documentation/examples and confirm exact public APIs
   before implementing against them. Baseline is Pi 1.4.0 and 1.5.2 / Node 24+.
-- Start with deterministic offline tests and a fake JSONL RPC subprocess.
+- Use deterministic offline tests with a fake JSONL RPC subprocess.
 - Run `./scripts/test` for the full deterministic offline suite, or
   `./scripts/test rpc.test.ts` for one file (Node 24+, no provider calls).
   No build step is required. Keep opt-in live probes separate from this suite.

@@ -22,8 +22,8 @@ parent Pi (TUI or RPC)
   └── extension
         ├── model-facing `subagent` tool
         ├── in-memory controller/registry
-        └── `/agents` viewer
-              └── child Pi RPC processes
+        │     └── child Pi RPC processes
+        └── `/agents` viewer (read/steer)
 ```
 
 Source layout:
@@ -75,8 +75,9 @@ is sent.
 There are exactly two public states:
 
 - **`active`** — the child is working.
-- **`stopped`** — the child is not working; its process and context are retained
-  and readable, and normally resumable.
+- **`stopped`** — the child is not working; the entry and output are retained
+  and readable. A live process/context can normally resume; a dead process
+  cannot.
 
 `finished`/`failed` is an outcome, not a state. `removed` is not a state: the
 entry, process and transcript are gone.
@@ -88,7 +89,7 @@ entry, process and transcript are gone.
 | Provider/run error | `stopped` with diagnostic; `send` can retry in the same context. |
 | Fatal transport/startup failure | `stopped` and readable; not auto-removed. A dead process cannot resume, so `read` then `remove`. |
 | `send` | Same child/context; native `streamingBehavior: "steer"` starts a turn when idle or queues while active. |
-| `stop` | `clear_queue` then `abort`; keeps process/context, retains partial output, sends no notice, idempotent. |
+| `stop` | `clear_queue` then `abort`; keeps a live process/context, retains partial output, sends no notice, idempotent. |
 | `remove` | Cancels pending notices/reminders, deletes the entry, then kills/cleans the process; no notice. |
 | Parent shutdown | Releases all remaining children. |
 
@@ -115,11 +116,12 @@ and `deliverAs: "steer"`, which wakes an idle parent and delivers at the next
 message boundary when busy. The `<system-notification>` tag is text inside that
 message, not a privileged Pi role.
 
-Notices coalesce at `turn_end`, the next `agent_start`, `session_compact` /
-`session_compact_failed`, and `agent_end`. While idle, a short 100 ms window
-batches near-simultaneous completions. A child that remains `active` for ten
-minutes produces a notification-only reminder every ten minutes. The timer is
-anchored at spawn, is not reset by steering or retries, and is cleared by
+Notices coalesce at `turn_end`, the next `agent_start`, `agent_settled`,
+`session_compact` / `session_compact_failed`, and `agent_end`. While idle, a short
+100 ms window batches near-simultaneous completions. A child that remains `active`
+for ten minutes produces a notification-only reminder every ten minutes. A run's
+timer starts at spawn for the initial launch, or at its first `agent_start` after
+a later settlement; steering and retries do not reset it. It is cleared by
 settlement, failure, stop and shutdown. A completion or stop removes any queued
 reminder for that child.
 
@@ -133,8 +135,10 @@ They are Markdown files with YAML frontmatter:
   project trusted.
 
 Project presets override user presets by name. Trust follows Pi's
-`ctx.isProjectTrusted()` result; a saved trust decision or explicit approval
-override prevails over auto-trust. No presets ship with the extension.
+`ctx.isProjectTrusted()` result. On Pi 1.5.0+ a saved trust decision or explicit
+approval override prevails over auto-trust; on Pi 1.4.0 a preset-only project is
+auto-trusted before saved decisions are consulted. No presets ship with the
+extension.
 
 Fields are `name`, `description`, `model`, `thinking`, `tools`, and either the
 Markdown body or a frontmatter `system_append`. The body is the conventional

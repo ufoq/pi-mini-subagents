@@ -62,7 +62,7 @@ slice simple; do not restart the architecture survey or adopt a framework.
 - Prefer a few TypeScript modules and Pi/Node built-ins. No build toolchain unless
   evidence shows it is necessary. No private-runtime casts or monkey patches.
 - Read the installed Pi documentation/examples and confirm exact public APIs
-  before implementing against them. Baseline is Pi 1.4.0 / Node 24+.
+  before implementing against them. Baseline is Pi 1.4.0 and 1.5.2 / Node 24+.
 - Start with deterministic offline tests and a fake JSONL RPC subprocess.
 - Run `./scripts/test` for the full deterministic offline suite, or
   `./scripts/test rpc.test.ts` for one file (Node 24+, no provider calls).

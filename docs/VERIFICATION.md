@@ -2,11 +2,36 @@
 
 Checked 2026-11-02 in the project checkout of its dedicated development
 environment. Pi 1.4.0, Node 24.20.0, Linux. This is implementation evidence, not a
-claim of exhaustive production readiness.
+claim of exhaustive production readiness. Re-verified 2026-11-12 on Pi 1.5.2; see
+the next section. Historical 1.4.0 records below are retained.
 
 The npm package was later renamed from `pi-mini-subagents` to
 `@ufoq/pi-mini-subagents`. Historical sections below keep the old name as the
 name that was actually installed and tested at the time.
+
+## Pi 1.5.2 compatibility re-verification (2026-11-12)
+
+- Local: Node 24.20.0 with Pi 1.5.2 pinned from an unpacked package copy at
+  `tmp/pi152/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js`,
+  invoked through `tmp/pi152/node_modules/.bin/pi`. The installed `pi` on PATH
+  remains 1.4.0. `PATH="$PWD/tmp/pi152/node_modules/.bin:$PATH" ./scripts/test`
+  passed **86/86**, and the native TUI mock probe passed with the same PATH.
+- Disposable Ubuntu 24.04.5 lease: Node 24.20.0, Pi 1.5.2 installed globally.
+  The full suite run against the installed `@ufoq/pi-mini-subagents@0.2.4`
+  package files passed **86/86**, including the native RPC parent tests that
+  spawn real child processes.
+- The lease TUI probe failed at its "reopen same child" check. The same check
+  failed with Pi 1.4.0 installed in that lease, while local TUI probes pass on
+  both versions. This is evidence of a lease/PTY timing limitation, not a
+  1.5.2-specific regression; no lease TUI pass is claimed.
+- No live-provider calls were made for 1.5.2. The RPC command and type surface is
+  identical between 1.4.0 and 1.5.2; extension API changes are additive; the
+  tool's plain JSON Schema is accepted by Pi 1.5.2's validator; no runtime code
+  change was required.
+- Pi 1.5.0 makes a saved project-trust decision take precedence over auto-trust
+  for projects without trust-requiring resources; project presets follow
+  `ctx.isProjectTrusted()`. Pi 1.5.1+ defaults `cacheWarming` to `"idle"`; see
+  the README limitation for the possible child cost.
 
 ## Commands actually executed
 
@@ -179,9 +204,10 @@ No separate parent instruction/catalog injection is added by this extension.
 
 ## Package and scope
 
-Tarball dry-run contains `index.ts`, `agents.ts`, `rpc.ts`, `viewer.ts`,
-`package.json` and README only. Host-provided public libraries are peers, no build
-or bundled Pi copy. Supported/tested baseline is explicit; peer `*` follows Pi's
+Tarball dry-run contains `index.ts`, `agents.ts`, `presets.ts`, `rpc.ts`,
+`viewer.ts`, `package.json`, `README.md`, `LICENSE` and `CHANGELOG.md`.
+Host-provided public libraries are peers, no build or bundled Pi copy.
+Supported/tested baseline is Pi 1.4.0 and 1.5.2 explicitly; peer `*` follows Pi's
 package guidance and does not imply every Pi version was verified.
 
 Only repository files, dedicated subprocesses, scratch config/transcripts and
@@ -462,10 +488,12 @@ operator's.
 ### Preset trust, normal append and prompt-file cleanup (0.2.0 review fixes)
 
 - Project presets use Pi's `ctx.isProjectTrusted()` directly. The extension adds
-  no second trust layer: a project containing only `.pi/subagent-presets` is
-  auto-trusted by Pi, so its presets can override user presets by name. This is
-  deliberate; presets are launch configuration for sandboxed workers, not a
-  security boundary. A test confirms project presets appear only when the
+  no second trust layer. On Pi 1.4.0 a project containing only
+  `.pi/subagent-presets` was auto-trusted by Pi, so its presets could override
+  user presets by name; Pi 1.5.0 now lets a saved trust decision take precedence,
+  so a saved denial keeps project presets and the project `APPEND_SYSTEM.md` off.
+  This is deliberate; presets are launch configuration for sandboxed workers, not
+  a security boundary. A test confirms project presets appear only when the
   context reports the project trusted.
 - `--append-system-prompt` replaces Pi's normal append-source discovery, so a
   preset would otherwise drop `APPEND_SYSTEM.md`. `composeSystemAppend()` keeps

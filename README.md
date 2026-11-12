@@ -4,7 +4,8 @@ A small Pi extension for **persistent, observable and steerable background
 subagents**. One model-facing tool, one human viewer, one in-memory registry.
 No scheduler or orchestration framework.
 
-**Working vertical slice:** verified with Pi **1.4.0**, Node **24.20.0**, Linux.
+**Working vertical slice:** verified with Pi **1.4.0** and **1.5.2**, Node
+**24.20.0**, Linux.
 Native TUI and native RPC parents load the same extension; children are persistent
 Pi RPC processes. See [verification](#verification) for what was actually tested.
 Public package: `@ufoq/pi-mini-subagents`. Canonical upstream:
@@ -119,8 +120,9 @@ presets ship with the extension.
 
 Project presets follow Pi's own project-trust result. The extension adds no
 second trust rule. Pi treats a project whose only resource is
-`.pi/subagent-presets` as trusted, so use user-level presets when repository
-presets should not override them.
+`.pi/subagent-presets` as trusted unless Pi has a saved trust decision or an
+explicit approval override. Use user-level presets when repository presets
+should not override them.
 
 ```markdown
 ---
@@ -242,9 +244,9 @@ controls are separate from the TUI for a later explicit adapter.
 node scripts/probe-tui.ts          # separate native TUI/PTy probe; local mock only
 ```
 
-The suite needs Node 24+ and installed Pi 1.4.0 on PATH (transport/controller
-files alone need only Node). The optional TUI probe also needs Python 3 with
-Unix `pty`. No test framework/build toolchain or external provider requests.
+The suite needs Node 24+ and installed Pi 1.4.0 or 1.5.2 on PATH
+(transport/controller files alone need only Node). The optional TUI probe also
+needs Python 3 with Unix `pty`. No test framework/build toolchain or external provider requests.
 Tests use separate subprocesses and synthetic data under ignored `tmp/`.
 
 Real-model smoke is **separate and opt-in**, consumes provider tokens, and uses
@@ -309,8 +311,15 @@ Actually executed during development:
 - Same real-model TUI loop with third-party extensions loaded (powerline footer,
   a context extension, a terminal bundle) in an isolated temp agent dir: viewer
   open/close, editor and exit remain functional; no extension load failure.
+- Pi **1.5.2** compatibility re-check (2026-11-12): local deterministic suite
+  **86/86** and native TUI mock probe pass; a fresh disposable lease (Node
+  24.20.0, Pi 1.5.2) passed the same suite **86/86**. The lease TUI probe's
+  "reopen same child" step failed with both Pi 1.4.0 and 1.5.2 in that lease,
+  while local TUI probes pass on both; no 1.5.2-specific regression was found.
+  No live provider calls were made.
 - `npm pack --dry-run --json`: payload includes only source modules, package
-  metadata and README; not tests, fixtures, scratch logs or design research.
+  metadata, README, LICENSE and CHANGELOG; not tests, fixtures, scratch logs or
+  design research.
 
 See [docs/VERIFICATION.md](docs/VERIFICATION.md) for evidence/limitations and the
 [implementation plan](docs/design/PLAN.md) for the original acceptance gates.
@@ -329,6 +338,14 @@ transactional task control. Providers installed only by a parent extension (or
 runtime-only credential overrides) are not automatically inherited. Existing
 third-party footer/editor extension combinations have not been exhaustively
 compatibility-tested.
+
+**Pi 1.5.1+ cache warming:** a stopped child kept for follow-up may keep eligible
+provider caches warm for up to 30 minutes between runs. Warming only happens when
+the model declares a cache lifetime and Pi expects the refresh to pay for itself;
+the refresh usage can be billable and counts toward the child's usage totals but
+is not included in parent context or the parent footer. It cannot be disabled per
+child; set the global `cacheWarming` setting to `"streaming"` or `"off"` to stop
+idle warming (this also affects the parent).
 
 **Known upstream interaction:** pi-powerline-footer 0.17.1 throws
 `Cannot read properties of undefined (reading 'replace')` in its

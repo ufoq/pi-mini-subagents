@@ -1,7 +1,8 @@
 # Pi subagents: implementation plan
 
 Updated: 2026-11-02
-Status: working vertical slice implemented and verified on Pi 1.4.0. See
+Status: working vertical slice implemented and verified on Pi 1.4.0 and 1.5.2.
+See
 [../VERIFICATION.md](../VERIFICATION.md) for actual runs and limitations. The
 placement notes below supersede earlier blueprint-based experiments.
 Decisions: [DEFAULTS.md](DEFAULTS.md). Requirements: [FEATURES.md](FEATURES.md).
@@ -117,8 +118,9 @@ Optional Markdown presets live under `~/.pi/agent/subagent-presets/` and, when
 Pi reports the project as trusted, `<nearest-project>/.pi/subagent-presets/`.
 Project presets override user presets by name. Trust follows Pi's
 `isProjectTrusted()` result; the extension adds no second rule. Pi treats a
-preset-only project as trusted, so use user-level presets when repository
-presets should not override them.
+preset-only project as trusted unless Pi has a saved trust decision or an
+explicit approval override; from Pi 1.5.0 a saved denial takes precedence. Use
+user-level presets when repository presets should not override them.
 Fields are `name`, `description`, `model`, `thinking`, `tools`, and either the
 Markdown body or a frontmatter `system_append`; the body is the conventional
 prompt. Preset append is added after the normal `APPEND_SYSTEM.md`, not instead
@@ -279,7 +281,7 @@ putting JSON RPC in tmux or starting it with closed stdin is not a web server.
 
 ## 7. Validation commands
 
-Available offline wrapper (Node 24+; installed Pi 1.4.0 for adapter/native tests):
+Available offline wrapper (Node 24+; installed Pi 1.4.0 or 1.5.2 for adapter/native tests):
 
 ```sh
 ./scripts/test                # all project offline tests
